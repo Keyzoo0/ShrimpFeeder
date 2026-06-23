@@ -1,0 +1,27 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+
+    "state": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "command": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "ts": { ".validate": "newData.isNumber()" }
+    },
+    "activeSchedule": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "feedEvents": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$pushId": {
+        "ts": { ".validate": "newData.isNumber()" }
+      }
+    }
+  }
+}

@@ -1,0 +1,567 @@
+/*
+ * ============================================================================
+ *  SMART SHRIMP FEEDER  v3  —  ESP32 + Firebase (REST API, tanpa Mobizt)
+ * ============================================================================
+ *  - Bridge: Firebase Realtime Database via REST (HTTPClient), polling.
+ *  - Scheduler OTONOM: NTP + baca /activeSchedule -> jalankan feeding sendiri.
+ *  - Kontrol manual realtime: baca /command (last-write-wins via ts).
+ *  - Telemetri: PUT /state; log: POST /feedEvents.
+ *  - Hardware: HX711, BTS7960 + encoder, ESP32Servo, SSR blower, LCD I2C, 3 PB.
+ *
+ *  Butuh Arduino-ESP32 core 3.x (analogWrite tersedia). Lib: ArduinoJson v6,
+ *  HX711, LiquidCrystal_I2C, ESP32Servo.
+ *
+ *  CATATAN KEAMANAN: isi kredensial di bawah, JANGAN commit nilai asli ke repo
+ *  publik. (Di proyek ini firmware tidak ditrack berisi rahasia.)
+ * ============================================================================
+ */
+
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <HX711.h>
+#include <LiquidCrystal_I2C.h>
+#include <ESP32Servo.h>
+#include <time.h>
+
+// ============================ KONFIGURASI ===================================
+const char* WIFI_SSID     = "udang";
+const char* WIFI_PASSWORD = "12345678";
+
+// Firebase (gunakan akun DEVICE khusus yang dibuat manual di Firebase Auth)
+#define FB_API_KEY      "AIzaSyCHz1qENBKAxSgXhsXjQrsCnQLlRTbipKc"
+#define FB_DB_URL       "https://udangdatabase-default-rtdb.firebaseio.com"
+#define FB_DEVICE_EMAIL "admin@gmail.com"
+#define FB_DEVICE_PASS  "admin123"
+
+// NTP (WIB = UTC+7). gmtOffset 7*3600, no DST.
+const long  GMT_OFFSET_SEC = 7 * 3600;
+const int   DST_OFFSET_SEC = 0;
+const char* NTP1 = "pool.ntp.org";
+const char* NTP2 = "time.google.com";
+
+// Interval (ms)
+const unsigned long POLL_CMD_INTERVAL   = 1500;
+const unsigned long PUSH_STATE_INTERVAL = 2000;
+const unsigned long FETCH_SCHED_INTERVAL= 30000;
+const unsigned long LCD_INTERVAL        = 500;
+
+// Safety timeout feeding (ms)
+const unsigned long MOTOR_MOVE_TIMEOUT  = 8000;
+const unsigned long WEIGH_TIMEOUT       = 60000;
+const unsigned long EMPTY_TIMEOUT       = 30000;
+
+// ============================ PIN HARDWARE ==================================
+HX711 scale;
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+uint8_t dataPin = 15, clockPin = 5;
+
+#define RPWM 26
+#define LPWM 25
+#define ENCODER_A 34
+#define ENCODER_B 35
+#define POSISI_BUKA   600
+#define POSISI_TUTUP -100
+#define PWM_MOTOR 100
+#define TOLERANSI 5
+
+#define SSR_PIN 14
+#define SERVO_PIN 23
+#define PB1 32   // Motor
+#define PB2 33   // SSR
+#define PB3 27   // Servo
+
+Servo myservo;
+
+// ============================ STATE GLOBAL ==================================
+float berat = 0;
+const float WEIGHT_VALID_MIN = 50.0;   // < ini dianggap 0
+const float EMPTY_THRESHOLD  = 30.0;   // dianggap kosong saat blower
+
+volatile long encoderCount = 0;
+bool  posisiBuka = false;
+bool  motorRunning = false;
+long  targetEncoder = POSISI_TUTUP;
+unsigned long motorStartMs = 0;
+
+bool  ssrState = false;
+int   servoTarget = 0;     // 0 / 50
+int   servoCurrent = 0;
+unsigned long lastServoStep = 0;
+
+// Firebase auth
+WiFiClientSecure tls;
+String idToken = "";
+unsigned long tokenExpireMs = 0;
+bool wifiConnected = false;
+bool fbReady = false;
+
+// Command tracking (last-write-wins)
+double lastCmdTs = 0;
+
+// Schedule (dari /activeSchedule)
+struct Cycle { String name; int days; float fr; };
+bool   schedEnabled = false;
+String schedStartDate = "2026-01-01";
+int    schedOffsetAge = 1;
+long   schedCount = 1000;
+float  schedInitialWeight = 5.0;
+String feedTimes[6]; int feedTimesN = 0;
+Cycle  cycles[6]; int cyclesN = 0;
+String lastFeedKey = "";   // cegah trigger ganda per slot/hari
+
+// Feeding state machine
+enum FeedStage { F_IDLE, F_OPEN, F_WEIGH, F_CLOSE, F_SERVO, F_BLOWER, F_EMPTY, F_DONE };
+FeedStage feedStage = F_IDLE;
+float  feedSetpoint = 0;
+String feedCycleName = "";
+String feedTrigger = "auto";
+unsigned long stageStartMs = 0;
+bool   stopRequested = false;
+
+// timers
+unsigned long tCmd=0, tState=0, tSched=0, tLcd=0;
+
+// ============================ ENCODER ISR ===================================
+void IRAM_ATTR encoderISR() {
+  if (digitalRead(ENCODER_A) == digitalRead(ENCODER_B)) encoderCount++;
+  else encoderCount--;
+}
+
+// ============================ MOTOR =========================================
+void motorMaju()  { analogWrite(RPWM, PWM_MOTOR); analogWrite(LPWM, 0); }
+void motorMundur(){ analogWrite(RPWM, 0); analogWrite(LPWM, PWM_MOTOR); }
+void stopMotor()  { analogWrite(RPWM, 0); analogWrite(LPWM, 0); motorRunning = false; }
+
+void setMotorPosition(bool buka) {
+  if (motorRunning) return;
+  posisiBuka = buka;
+  motorStartMs = millis();
+  if (buka) {
+    targetEncoder = POSISI_BUKA;
+    (encoderCount < POSISI_BUKA) ? motorMaju() : motorMundur();
+  } else {
+    targetEncoder = POSISI_TUTUP;
+    (encoderCount > POSISI_TUTUP) ? motorMundur() : motorMaju();
+  }
+  motorRunning = true;
+}
+
+// dipanggil tiap loop: cek target tercapai ATAU timeout (anti-runaway)
+void updateMotor() {
+  if (!motorRunning) return;
+  bool reached = (targetEncoder == POSISI_BUKA)
+                 ? (encoderCount >= POSISI_BUKA - TOLERANSI)
+                 : (encoderCount <= POSISI_TUTUP + TOLERANSI);
+  if (reached) { stopMotor(); return; }
+  if (millis() - motorStartMs > MOTOR_MOVE_TIMEOUT) {
+    stopMotor();
+    Serial.println("⚠️ MOTOR_TIMEOUT");
+  }
+}
+
+// ============================ SSR / SERVO ===================================
+void setSSR(bool on) { ssrState = on; digitalWrite(SSR_PIN, on ? HIGH : LOW); }
+
+void setServo(int angle) { servoTarget = (angle >= 50) ? 50 : 0; }
+
+void updateServo() {
+  if (servoCurrent == servoTarget) return;
+  if (millis() - lastServoStep < 15) return;   // non-blocking sweep
+  lastServoStep = millis();
+  servoCurrent += (servoCurrent < servoTarget) ? 1 : -1;
+  myservo.write(servoCurrent);
+}
+
+// ============================ LOADCELL ======================================
+float getValidatedWeight() {
+  float w = scale.get_units(5);
+  if (w < WEIGHT_VALID_MIN) return 0.0;
+  return w;
+}
+
+// ============================ WAKTU =========================================
+// Howard Hinnant days_from_civil -> hari sejak epoch (untuk selisih tanggal)
+long daysFromCivil(int y, unsigned m, unsigned d) {
+  y -= m <= 2;
+  long era = (y >= 0 ? y : y - 399) / 400;
+  unsigned yoe = (unsigned)(y - era * 400);
+  unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097L + (long)doe - 719468L;
+}
+
+bool getNowTm(struct tm &out) {
+  time_t now = time(nullptr);
+  if (now < 100000) return false;   // belum sinkron NTP
+  localtime_r(&now, &out);
+  return true;
+}
+
+// umur udang hari ini = offset + (hari ini - startDate)
+int currentAgeDays() {
+  struct tm t;
+  if (!getNowTm(t)) return -1;
+  long today = daysFromCivil(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+  int sy, sm, sd;
+  if (sscanf(schedStartDate.c_str(), "%d-%d-%d", &sy, &sm, &sd) != 3) return -1;
+  long start = daysFromCivil(sy, sm, sd);
+  return schedOffsetAge + (int)(today - start);
+}
+
+// setpoint siklus aktif (gram per feed); kembalikan -1 bila di luar masa tebar
+float currentSetpoint(String &cycleNameOut) {
+  int age = currentAgeDays();
+  if (age < 0) return -1;
+  float biomass = schedInitialWeight * (float)schedCount;
+  long acc = 0;
+  for (int i = 0; i < cyclesN; i++) {
+    if (age < acc + cycles[i].days) {
+      cycleNameOut = cycles[i].name;
+      float daily = biomass * cycles[i].fr / 100.0;
+      return daily / (feedTimesN > 0 ? feedTimesN : 3);
+    }
+    acc += cycles[i].days;
+  }
+  return -1;   // selesai
+}
+
+// ============================ FIREBASE REST =================================
+bool fbAuthenticate() {
+  tls.setInsecure();
+  HTTPClient http;
+  String url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + String(FB_API_KEY);
+  http.begin(tls, url);
+  http.addHeader("Content-Type", "application/json");
+  String body = String("{\"email\":\"") + FB_DEVICE_EMAIL +
+                "\",\"password\":\"" + FB_DEVICE_PASS + "\",\"returnSecureToken\":true}";
+  int code = http.POST(body);
+  bool ok = false;
+  if (code == 200) {
+    StaticJsonDocument<1024> doc;
+    if (!deserializeJson(doc, http.getString()) && doc.containsKey("idToken")) {
+      idToken = doc["idToken"].as<String>();
+      tokenExpireMs = millis() + 3500000UL;   // ~58 menit
+      fbReady = true; ok = true;
+      Serial.println("✅ Firebase auth OK");
+    }
+  } else {
+    Serial.printf("❌ Auth gagal HTTP %d\n", code);
+  }
+  http.end();
+  return ok;
+}
+
+void ensureToken() {
+  if (!fbReady || millis() > tokenExpireMs) fbAuthenticate();
+}
+
+bool fbGet(const String &path, String &out) {
+  if (!fbReady) return false;
+  HTTPClient http;
+  String url = String(FB_DB_URL) + path + ".json?auth=" + idToken;
+  http.begin(tls, url);
+  http.setTimeout(6000);
+  int code = http.GET();
+  bool ok = (code == 200);
+  if (ok) out = http.getString();
+  http.end();
+  return ok;
+}
+
+bool fbPut(const String &path, const String &json) {
+  if (!fbReady) return false;
+  HTTPClient http;
+  String url = String(FB_DB_URL) + path + ".json?auth=" + idToken;
+  http.begin(tls, url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(6000);
+  int code = http.PUT(json);
+  http.end();
+  return (code == 200);
+}
+
+bool fbPost(const String &path, const String &json) {
+  if (!fbReady) return false;
+  HTTPClient http;
+  String url = String(FB_DB_URL) + path + ".json?auth=" + idToken;
+  http.begin(tls, url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(6000);
+  int code = http.POST(json);
+  http.end();
+  return (code == 200);
+}
+
+// --------------------------- STATE / COMMAND --------------------------------
+void pushState() {
+  StaticJsonDocument<384> doc;
+  doc["weight"]   = berat;
+  doc["encoder"]  = encoderCount;
+  doc["motor"]    = posisiBuka ? 1 : 0;
+  doc["ssr"]      = ssrState ? 1 : 0;
+  doc["servo"]    = servoCurrent;
+  doc["feeding"]  = (feedStage != F_IDLE);
+  doc["stage"]    = (int)feedStage;
+  doc["online"]   = true;
+  doc["lastSeen"] = (double)time(nullptr) * 1000.0;
+  doc["error"]    = "";
+  String out; serializeJson(doc, out);
+  fbPut("/state", out);
+}
+
+void pollCommand() {
+  String resp;
+  if (!fbGet("/command", resp)) return;
+  StaticJsonDocument<384> doc;
+  if (deserializeJson(doc, resp)) return;
+  if (resp == "null") return;
+
+  double ts = doc["ts"] | 0.0;
+
+  // emergency stop selalu dihormati
+  bool stop = doc["stop"] | false;
+  if (stop && feedStage != F_IDLE) {
+    stopRequested = true;
+    Serial.println("🛑 STOP diterima");
+  }
+
+  if (ts <= lastCmdTs) return;   // bukan command baru
+  lastCmdTs = ts;
+
+  // feedNow -> mulai feeding manual
+  bool feedNow = doc["feedNow"] | false;
+  if (feedNow && feedStage == F_IDLE) {
+    String cyc; float sp = currentSetpoint(cyc);
+    if (sp <= 0) sp = 100;             // fallback bila jadwal off
+    startFeeding(sp, cyc.length() ? cyc : "manual", "manual");
+    return;
+  }
+
+  // command manual diabaikan saat feeding (kecuali stop di atas)
+  if (feedStage != F_IDLE) return;
+
+  if (!doc["motor"].isNull()) setMotorPosition(((int)doc["motor"]) == 1);
+  if (!doc["ssr"].isNull())   setSSR(((int)doc["ssr"]) == 1);
+  if (!doc["servo"].isNull()) setServo((int)doc["servo"]);
+}
+
+void fetchSchedule() {
+  String resp;
+  if (!fbGet("/activeSchedule", resp)) return;
+  StaticJsonDocument<1536> doc;
+  if (deserializeJson(doc, resp)) return;
+  if (resp == "null") return;
+
+  schedEnabled       = doc["enabled"] | false;
+  schedStartDate     = doc["startDate"] | "2026-01-01";
+  schedOffsetAge     = doc["offsetAge"] | 1;
+  schedCount         = doc["count"] | 1000;
+  schedInitialWeight = doc["initialWeight"] | 5.0f;
+
+  feedTimesN = 0;
+  for (JsonVariant v : doc["feedTimes"].as<JsonArray>()) {
+    if (feedTimesN < 6) feedTimes[feedTimesN++] = v.as<String>();
+  }
+  if (feedTimesN == 0) { feedTimes[0]="07:00"; feedTimes[1]="15:00"; feedTimes[2]="23:00"; feedTimesN=3; }
+
+  cyclesN = 0;
+  for (JsonObject c : doc["cycles"].as<JsonArray>()) {
+    if (cyclesN >= 6) break;
+    cycles[cyclesN].name = c["name"] | "";
+    cycles[cyclesN].days = c["days"] | 0;
+    cycles[cyclesN].fr   = c["fr"] | 0.0;
+    cyclesN++;
+  }
+}
+
+void pushFeedEvent(float delivered) {
+  StaticJsonDocument<256> doc;
+  doc["ts"]        = (double)time(nullptr) * 1000.0;
+  doc["setpoint"]  = feedSetpoint;
+  doc["delivered"] = delivered;
+  doc["cycle"]     = feedCycleName;
+  doc["trigger"]   = feedTrigger;
+  String out; serializeJson(doc, out);
+  fbPost("/feedEvents", out);
+}
+
+// ============================ FEEDING SEQUENCE ==============================
+void startFeeding(float setpoint, String cycleName, String trigger) {
+  if (feedStage != F_IDLE) return;
+  feedSetpoint  = setpoint;
+  feedCycleName = cycleName;
+  feedTrigger   = trigger;
+  stopRequested = false;
+  feedStage = F_OPEN;
+  stageStartMs = millis();
+  setMotorPosition(true);              // buka katup
+  Serial.printf("🍽️ Feeding mulai: setpoint=%.0f g (%s/%s)\n",
+                setpoint, cycleName.c_str(), trigger.c_str());
+}
+
+void abortFeeding() {
+  stopMotor(); setSSR(false); setServo(0);
+  feedStage = F_IDLE;
+  Serial.println("🛑 Feeding dibatalkan");
+}
+
+void updateFeeding() {
+  if (feedStage == F_IDLE) return;
+  if (stopRequested) { abortFeeding(); return; }
+  unsigned long el = millis() - stageStartMs;
+
+  switch (feedStage) {
+    case F_OPEN:
+      if (!motorRunning) { feedStage = F_WEIGH; stageStartMs = millis(); }
+      else if (el > MOTOR_MOVE_TIMEOUT) { Serial.println("⚠️ open timeout"); feedStage = F_WEIGH; stageStartMs = millis(); }
+      break;
+
+    case F_WEIGH:
+      if (berat >= feedSetpoint) { setMotorPosition(false); feedStage = F_CLOSE; stageStartMs = millis(); }
+      else if (el > WEIGH_TIMEOUT) { Serial.println("⚠️ weigh timeout"); setMotorPosition(false); feedStage = F_CLOSE; stageStartMs = millis(); }
+      break;
+
+    case F_CLOSE:
+      if (!motorRunning || el > MOTOR_MOVE_TIMEOUT) { setServo(50); feedStage = F_SERVO; stageStartMs = millis(); }
+      break;
+
+    case F_SERVO:
+      if (servoCurrent == 50 || el > 2000) { setSSR(true); feedStage = F_BLOWER; stageStartMs = millis(); }
+      break;
+
+    case F_BLOWER:
+      if (el > 1500) { feedStage = F_EMPTY; stageStartMs = millis(); }   // beri jeda blower nyala
+      break;
+
+    case F_EMPTY:
+      if (berat <= EMPTY_THRESHOLD || el > EMPTY_TIMEOUT) {
+        setSSR(false); setServo(0);
+        pushFeedEvent(berat);
+        feedStage = F_DONE; stageStartMs = millis();
+      }
+      break;
+
+    case F_DONE:
+      if (servoCurrent == 0 || el > 2000) {
+        feedStage = F_IDLE;
+        Serial.println("✅ Feeding selesai");
+      }
+      break;
+
+    default: break;
+  }
+}
+
+// ============================ SCHEDULER =====================================
+void checkSchedule() {
+  if (!schedEnabled || feedStage != F_IDLE) return;
+  struct tm t;
+  if (!getNowTm(t)) return;
+  char hhmm[6]; snprintf(hhmm, sizeof(hhmm), "%02d:%02d", t.tm_hour, t.tm_min);
+  for (int i = 0; i < feedTimesN; i++) {
+    if (feedTimes[i] == String(hhmm)) {
+      char key[24];
+      snprintf(key, sizeof(key), "%04d%02d%02d-%s", t.tm_year+1900, t.tm_mon+1, t.tm_mday, hhmm);
+      if (lastFeedKey == String(key)) return;   // sudah dipicu
+      String cyc; float sp = currentSetpoint(cyc);
+      if (sp > 0) {
+        lastFeedKey = String(key);
+        startFeeding(sp, cyc, "auto");
+      }
+      return;
+    }
+  }
+}
+
+// ============================ PUSH BUTTON (lokal) ===========================
+void handleButtons() {
+  static bool l1=HIGH,l2=HIGH,l3=HIGH;
+  bool b1=digitalRead(PB1), b2=digitalRead(PB2), b3=digitalRead(PB3);
+  if (feedStage == F_IDLE) {   // manual lokal hanya saat idle
+    if (l1==HIGH && b1==LOW && !motorRunning) setMotorPosition(!posisiBuka);
+    if (l2==HIGH && b2==LOW) setSSR(!ssrState);
+    if (l3==HIGH && b3==LOW) setServo(servoTarget==50?0:50);
+  }
+  l1=b1; l2=b2; l3=b3;
+}
+
+// ============================ LCD ===========================================
+void updateLCD() {
+  lcd.setCursor(0,0);
+  lcd.print("B:"); lcd.print(berat,0); lcd.print("g ");
+  lcd.print(feedStage!=F_IDLE ? "FEED " : (fbReady?"ONL ":"OFF "));
+  lcd.print("   ");
+  lcd.setCursor(0,1);
+  lcd.print("M:"); lcd.print(posisiBuka?"O":"-");
+  lcd.print(" S:"); lcd.print(ssrState?"1":"0");
+  lcd.print(" V:"); lcd.print(servoCurrent);
+  lcd.print(" ");  lcd.print(schedEnabled?"AUTO":"man");
+  lcd.print("   ");
+}
+
+// ============================ SETUP =========================================
+void setup() {
+  Serial.begin(115200);
+  delay(300);
+
+  pinMode(PB1, INPUT_PULLUP); pinMode(PB2, INPUT_PULLUP); pinMode(PB3, INPUT_PULLUP);
+  pinMode(SSR_PIN, OUTPUT); digitalWrite(SSR_PIN, LOW);
+  pinMode(RPWM, OUTPUT); pinMode(LPWM, OUTPUT);
+  pinMode(ENCODER_A, INPUT); pinMode(ENCODER_B, INPUT);
+  analogWrite(RPWM,0); analogWrite(LPWM,0);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_A), encoderISR, CHANGE);
+
+  lcd.init(); lcd.backlight();
+  lcd.setCursor(0,0); lcd.print("Shrimp Feeder v3");
+  lcd.setCursor(0,1); lcd.print("Init...");
+
+  scale.begin(dataPin, clockPin);
+  scale.set_offset(193344);
+  scale.set_scale(104.434151);
+  scale.tare();
+
+  myservo.setPeriodHertz(50);
+  myservo.attach(SERVO_PIN, 500, 2400);
+  myservo.write(0);
+
+  // WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  int a=0; while (WiFi.status()!=WL_CONNECTED && a<30){ delay(500); Serial.print("."); a++; }
+  wifiConnected = (WiFi.status()==WL_CONNECTED);
+
+  if (wifiConnected) {
+    Serial.println("\n✅ WiFi: " + WiFi.localIP().toString());
+    configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, NTP1, NTP2);
+    fbAuthenticate();
+    fetchSchedule();
+    pushState();
+  } else {
+    Serial.println("\n⚠️ WiFi gagal — mode lokal");
+  }
+
+  lcd.clear();
+}
+
+// ============================ LOOP ==========================================
+void loop() {
+  unsigned long now = millis();
+
+  // hardware non-blocking
+  berat = getValidatedWeight();
+  updateMotor();
+  updateServo();
+  handleButtons();
+  updateFeeding();
+  checkSchedule();
+
+  if (wifiConnected) {
+    ensureToken();
+    if (now - tCmd   >= POLL_CMD_INTERVAL)   { tCmd=now;   pollCommand(); }
+    if (now - tState >= PUSH_STATE_INTERVAL) { tState=now; pushState(); }
+    if (now - tSched >= FETCH_SCHED_INTERVAL){ tSched=now; fetchSchedule(); }
+  }
+
+  if (now - tLcd >= LCD_INTERVAL) { tLcd=now; updateLCD(); }
+}

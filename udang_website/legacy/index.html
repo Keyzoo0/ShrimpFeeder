@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+  <title>Smart Shrimp Feeder • MQTT + Manual</title>
+  <style>
+    :root {
+      --bg: #f0f4f5; --panel: #ffffff; --ink: #172126; --muted: #65747b;
+      --line: #d9e2e5; --teal: #0f8b8d; --teal-dark: #086568; --green: #2f9e44;
+      --amber: #d9822b; --red: #d64545; --blue: #1a73e8; --shadow: 0 8px 24px rgba(23, 33, 38, 0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; line-height: 1.5; }
+    .container { max-width: 860px; margin: 0 auto; padding: 16px; }
+
+    header { display: flex; justify-content: space-between; align-items: center; padding: 12px 0 20px; border-bottom: 1px solid var(--line); margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center;
+      overflow: hidden; background: #fff; border: 2px solid var(--teal); flex-shrink: 0;
+    }
+    .brand-mark img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .brand h1 { font-size: 18px; font-weight: 700; }
+    .brand span { font-size: 11px; color: var(--muted); display: block; }
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 14px; background: #e8f5f5; border-radius: 20px; color: var(--teal-dark); white-space: nowrap; }
+    .status-dot { width: 9px; height: 9px; background: var(--green); border-radius: 50%; animation: pulse 2s infinite; }
+    .status-dot.disconnected { background: var(--red); animation: none; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); margin-bottom: 16px; }
+    .card-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    .card-desc { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+
+    .mqtt-config { display: none; }
+
+    .flow-diagram { display: flex; justify-content: space-between; align-items: center; padding: 16px 8px; background: #f8fbfb; border-radius: 10px; margin-bottom: 20px; position: relative; flex-wrap: wrap; }
+    .flow-diagram::before { content: ''; position: absolute; top: 26px; left: 10%; right: 10%; height: 2px; background: var(--line); z-index: 0; }
+    .flow-step { text-align: center; position: relative; z-index: 1; flex: 1; min-width: 65px; }
+    .flow-icon { width: 44px; height: 44px; border-radius: 50%; background: #e8f1f1; display: grid; place-items: center; margin: 0 auto 6px; font-size: 18px; transition: all 0.3s; border: 3px solid transparent; }
+    .flow-step.active .flow-icon { background: var(--teal); color: white; border-color: var(--teal-dark); transform: scale(1.08); }
+    .flow-step.done .flow-icon { background: var(--green); color: white; }
+    .flow-label { font-size: 10px; font-weight: 700; color: var(--muted); }
+
+    .weight-display { text-align: center; padding: 20px; background: #f8fbfb; border-radius: 10px; margin-bottom: 20px; border: 2px solid var(--line); }
+    .weight-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .weight-value { font-size: 44px; font-weight: 800; color: var(--teal-dark); line-height: 1; }
+    .weight-unit { font-size: 16px; color: var(--muted); margin-left: 4px; }
+    .weight-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+    .target-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-bottom: 16px; }
+    .btn { padding: 10px 14px; border: none; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-primary { background: var(--teal); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--teal-dark); }
+    .btn-primary:disabled { background: #a0c4c5; cursor: not-allowed; }
+    .btn-sm { padding: 8px 14px; font-size: 12px; background: #fff; border: 1px solid var(--line); }
+    .btn-sm:hover { background: #f0f4f5; }
+    .btn-danger { background: var(--red); color: white; }
+    .btn-danger:hover { background: #c0392b; }
+    .btn-connect { background: var(--green); color: white; }
+    .btn-connect:hover { background: #1e7e34; }
+    .btn-disconnect { background: var(--red); color: white; }
+    .btn-disconnect:hover { background: #c0392b; }
+
+    .control-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .ctrl-card { background: #f8fbfb; border: 1px solid var(--line); border-radius: 10px; padding: 16px; text-align: center; }
+    .ctrl-icon { font-size: 28px; margin-bottom: 8px; display: flex; justify-content: center; align-items: center; }
+    .ctrl-label { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 10px; }
+    .toggle-btn { padding: 8px 16px; border-radius: 20px; border: 2px solid var(--line); background: #fff; font-weight: 700; font-size: 13px; cursor: pointer; transition: 0.2s; min-width: 80px; }
+    .toggle-btn.on { background: var(--teal); color: white; border-color: var(--teal-dark); }
+    .toggle-btn.off { background: #fff; color: var(--muted); }
+
+    .component-status { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .comp-item { text-align: center; padding: 10px 4px; background: #f8fbfb; border-radius: 8px; }
+    .comp-icon { font-size: 20px; margin-bottom: 4px; display: flex; justify-content: center; align-items: center; }
+    .comp-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+    .comp-value { font-size: 11px; font-weight: 700; }
+    .comp-value.ok { color: var(--green); } .comp-value.wait { color: var(--amber); } .comp-value.off { color: var(--muted); }
+
+    .schedule-box { display: none; padding: 14px; background: #f8fbfb; border-radius: 8px; border: 1px solid var(--line); margin-bottom: 16px; }
+    .schedule-box.active { display: block; }
+    .time-day-row { display: grid; grid-template-columns: 100px 1fr auto; gap: 8px; margin-bottom: 10px; align-items: end; }
+    .day-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+    .day-checks label { font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 3px; background: #fff; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--line); }
+    .day-checks input { accent-color: var(--teal); }
+    .schedule-list { display: grid; gap: 6px; margin-top: 10px; }
+    .schedule-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: white; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+
+    .next-box { text-align: center; padding: 10px; background: #e8f4ff; border-radius: 8px; margin-bottom: 14px; border: 1px solid #b3d9ff; display: none; }
+    .next-box.active { display: block; }
+    .progress-wrap { margin-top: 14px; display: none; }
+    .progress-wrap.active { display: block; }
+    .progress-bar { height: 7px; background: #e8f1f1; border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--teal); width: 0%; transition: width 0.3s; }
+
+    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    .badge { padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; }
+    .badge.ok { background: #e5f7e9; color: #146c2e; }
+
+    .toast { position: fixed; bottom: 20px; right: 20px; background: var(--ink); color: white; padding: 12px 20px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); display: none; z-index: 100; animation: slideIn 0.3s ease; }
+    .toast.show { display: block; } .toast.error { background: var(--red); } .toast.success { background: var(--green); }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+    /* Servo SVG Animations */
+    .servo-svg { width: 32px; height: 32px; transition: transform 0.3s ease; }
+    .servo-arm { transition: transform 0.5s ease; transform-origin: 16px 20px; }
+    .servo-svg.active .servo-arm { transform: rotate(50deg); }
+    
+    @keyframes servoPulse {
+      0%, 100% { filter: drop-shadow(0 0 0px rgba(15, 139, 141, 0)); }
+      50% { filter: drop-shadow(0 0 3px rgba(15, 139, 141, 0.5)); }
+    }
+    .servo-svg.active { animation: servoPulse 1.5s infinite; }
+
+    /* Feeding Calculator Styles */
+    .calc-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .calc-field {
+      background: #f8fbfb;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .calc-field label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .calc-field input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      background: white;
+    }
+    .calc-field input:focus {
+      outline: 2px solid var(--teal);
+      border-color: var(--teal);
+    }
+    .calc-field .value-display {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--teal-dark);
+      padding: 4px 0;
+    }
+    .calc-field .unit {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 400;
+      margin-left: 2px;
+    }
+    .monitoring-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 2px solid var(--line);
+    }
+    .monitor-item {
+      text-align: center;
+      background: #f8fbfb;
+      padding: 12px 8px;
+      border-radius: 8px;
+    }
+    .monitor-label {
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .monitor-value {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--teal-dark);
+      margin-top: 4px;
+    }
+    .monitor-value .unit {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--muted);
+    }
+    .phase-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--teal);
+      color: white;
+    }
+
+    @media (max-width: 600px) {
+      .control-grid { grid-template-columns: 1fr 1fr; }
+      .component-status { grid-template-columns: 1fr 1fr; }
+      .flow-diagram::before { display: none; }
+      .calc-grid { grid-template-columns: 1fr; }
+      .monitoring-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">
+          <img src="udang.png" alt="🦐" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ccircle cx=%2750%27 cy=%2750%27 r=%2745%27 fill=%27%230f8b8d%27/%3E%3Ctext x=%2750%27 y=%2762%27 text-anchor=%27middle%27 fill=%27white%27 font-size=%2745%27%3E🦐%3C/text%3E%3C/svg%3E'">
+        </div>
+        <h1>shrimp feeder</h1>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-connect btn-sm" id="mqttConnectBtn">🔌 Connect</button>
+        <div class="status">
+          <span class="status-dot disconnected" id="mqttDot"></span>
+          <span id="mqttStatus">MQTT Disconnected</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- FEEDING CALCULATOR -->
+    <div class="card">
+      <h2 class="card-title">📊 Kalkulator Pakan Udang</h2>
+      <div class="calc-grid">
+        <div class="calc-field">
+          <label>📅 Umur Udang (Hari)</label>
+          <input type="number" id="shrimpAge" min="1" max="105" value="30" onchange="calculateFeed()">
+        </div>
+        <div class="calc-field">
+          <label>🦐 Jumlah Udang (Ekor)</label>
+          <input type="number" id="shrimpPopulation" min="1" value="1000" onchange="calculateFeed()">
+        </div>
+        <div class="calc-field">
+          <label>⚖️ Berat Rata-rata (Gram/Ekor)</label>
+          <input type="number" id="shrimpWeight" min="0.1" step="0.1" value="5" onchange="calculateFeed()">
+        </div>
+      </div>
+
+      <!-- MONITORING -->
+      <div class="monitoring-grid">
+        <div class="monitor-item">
+          <div class="monitor-label">📅 Umur Udang</div>
+          <div class="monitor-value"><span id="displayAge">30</span> <span class="unit">Hari</span></div>
+          <div style="margin-top:4px;"><span class="phase-badge" id="displayPhase">Grower</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">🦐 Populasi</div>
+          <div class="monitor-value"><span id="displayPopulation">1,000</span> <span class="unit">Ekor</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">⚖️ Berat Rata-rata</div>
+          <div class="monitor-value"><span id="displayWeight">5.0</span> <span class="unit">Gram</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">📊 Biomassa</div>
+          <div class="monitor-value"><span id="displayBiomass">5.0</span> <span class="unit">Kg</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">📈 FR (Feeding Rate)</div>
+          <div class="monitor-value"><span id="displayFR">6.0</span> <span class="unit">%</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">🍽️ Pakan Harian</div>
+          <div class="monitor-value"><span id="displayDailyFeed">0.30</span> <span class="unit">Kg</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">🔄 Pakan/Tebar</div>
+          <div class="monitor-value"><span id="displayPerFeed">0.10</span> <span class="unit">Kg</span></div>
+        </div>
+        <div class="monitor-item">
+          <div class="monitor-label">🎯 Rekomendasi Target</div>
+          <div class="monitor-value"><span id="displayTarget">100</span> <span class="unit">Gram</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ALUR SISTEM -->
+    <div class="card">
+      <h2 class="card-title">🔄 Alur Sistem</h2>
+      <div class="flow-diagram">
+        <div class="flow-step" id="step1"><div class="flow-icon">⚙️</div><div class="flow-label">Motor Buka</div></div>
+        <div class="flow-step" id="step2"><div class="flow-icon">⚖️</div><div class="flow-label">Timbang</div></div>
+        <div class="flow-step" id="step3">
+          <div class="flow-icon" id="flowServoIcon">
+            <svg class="servo-svg" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="6" y="14" width="20" height="12" rx="3" fill="currentColor" opacity="0.3"/>
+              <rect x="8" y="16" width="16" height="8" rx="2" fill="currentColor" opacity="0.6"/>
+              <circle cx="16" cy="20" r="4" fill="currentColor"/>
+              <rect class="servo-arm" x="15" y="6" width="2" height="12" rx="1" fill="currentColor"/>
+              <rect class="servo-arm" x="12" y="4" width="8" height="3" rx="1.5" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="flow-label">Servo Open</div>
+        </div>
+        <div class="flow-step" id="step4"><div class="flow-icon">💨</div><div class="flow-label">SSR Blower</div></div>
+      </div>
+
+      <div class="weight-display">
+        <div class="weight-label">Berat Loadcell (Realtime)</div>
+        <div><span class="weight-value" id="weightVal">0</span><span class="weight-unit">gram</span></div>
+        <div class="weight-note" id="weightNote">Menunggu data hardware...</div>
+      </div>
+
+      <!-- TARGET BERAT -->
+      <div class="target-row">
+        <div class="field"><label>⚖️ Target Berat Pakan (Gram) </label><input type="number" id="targetInput" min="50" max="10000" step="10" value="100"></div>
+        <button class="btn btn-sm" id="saveTargetBtn">💾 Simpan</button>
+      </div>
+
+      <!-- KONTROL MANUAL (OFFLINE/ONLINE) -->
+      <h3 style="font-size:14px; margin-bottom:10px;">🕹️ Kontrol Hardware </h3>
+      <div class="control-grid">
+        <!-- MOTOR KATUP -->
+        <div class="ctrl-card">
+          <div class="ctrl-icon">⚙️</div>
+          <div class="ctrl-label">Motor Katup</div>
+          <button class="toggle-btn off" id="btnMotor">BUKA</button>
+          <div style="font-size:10px; color:var(--muted); margin-top:6px;">Encoder: <span id="encoderVal">-</span></div>
+        </div>
+        <!-- SSR BLOWER -->
+        <div class="ctrl-card">
+          <div class="ctrl-icon">💨</div>
+          <div class="ctrl-label">SSR Blower</div>
+          <button class="toggle-btn off" id="btnSSR">OFF</button>
+        </div>
+        <!-- SERVO -->
+        <div class="ctrl-card">
+          <div class="ctrl-icon" id="servoIcon">
+            <svg class="servo-svg" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="6" y="14" width="20" height="12" rx="3" fill="#65747b" opacity="0.3"/>
+              <rect x="8" y="16" width="16" height="8" rx="2" fill="#65747b" opacity="0.6"/>
+              <circle cx="16" cy="20" r="4" fill="#65747b"/>
+              <rect class="servo-arm" x="15" y="6" width="2" height="12" rx="1" fill="#65747b"/>
+              <rect class="servo-arm" x="12" y="4" width="8" height="3" rx="1.5" fill="#65747b"/>
+            </svg>
+          </div>
+          <div class="ctrl-label">Servo</div>
+          <button class="toggle-btn off" id="btnServo">TUTUP (0°)</button>
+        </div>
+      </div>
+
+      <!-- MODE JADWAL (Auto) -->
+      <div style="margin-bottom:12px;">
+        <label style="font-size:13px;font-weight:700;">⏱️ Mode Jadwal (Auto Feed)</label>
+        <div class="schedule-box" id="scheduleBox">
+          <div class="time-day-row">
+            <div class="field"><label>Jam</label><input type="time" id="schedTime" step="60"></div>
+            <div class="field"><label>Hari</label>
+              <div class="day-checks">
+                <label><input type="checkbox" value="1"> Sen</label>
+                <label><input type="checkbox" value="2"> Sel</label>
+                <label><input type="checkbox" value="3"> Rab</label>
+                <label><input type="checkbox" value="4"> Kam</label>
+                <label><input type="checkbox" value="5"> Jum</label>
+                <label><input type="checkbox" value="6"> Sab</label>
+                <label><input type="checkbox" value="0"> Min</label>
+              </div>
+            </div>
+            <button class="btn btn-sm" id="addSchedBtn">+ Tambah</button>
+          </div>
+          <div class="schedule-list" id="schedList"></div>
+        </div>
+        <button class="btn btn-sm" id="toggleSched" style="margin-top:6px;">📅 Tampilkan Jadwal</button>
+      </div>
+
+      <button class="btn btn-primary" id="feedBtn" style="width:100%;"> MULAI FEEDING </button>
+
+      <div class="progress-wrap" id="progressWrap">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px;"><span>Progress</span><span id="progPercent">0%</span></div>
+        <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
+      </div>
+
+      <!-- STATUS KOMPONEN -->
+      <div class="component-status">
+        <div class="comp-item"><div class="comp-icon">⚙️</div><div class="comp-label">Motor</div><div class="comp-value off" id="stMotor">Tertutup</div></div>
+        <div class="comp-item"><div class="comp-icon">⚖️</div><div class="comp-label">LoadCell</div><div class="comp-value wait" id="stLoad">0 g</div></div>
+        <div class="comp-item">
+          <div class="comp-icon" id="statusServoIcon">
+            <svg class="servo-svg" width="20" height="20" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="6" y="14" width="20" height="12" rx="3" fill="#65747b" opacity="0.3"/>
+              <rect x="8" y="16" width="16" height="8" rx="2" fill="#65747b" opacity="0.6"/>
+              <circle cx="16" cy="20" r="4" fill="#65747b"/>
+              <rect class="servo-arm" x="15" y="6" width="2" height="12" rx="1" fill="#65747b"/>
+              <rect class="servo-arm" x="12" y="4" width="8" height="3" rx="1.5" fill="#65747b"/>
+            </svg>
+          </div>
+          <div class="comp-label">Servo</div><div class="comp-value off" id="stServo">0°</div>
+        </div>
+        <div class="comp-item"><div class="comp-icon">💨</div><div class="comp-label">SSR</div><div class="comp-value off" id="stSSR">OFF</div></div>
+      </div>
+    </div>
+
+    <!-- RIWAYAT -->
+    <div class="card">
+      <h2 class="card-title">📋 Riwayat Feeding</h2>
+      <div id="historyList">
+        <div class="history-item"><div>Belum ada riwayat</div><span class="badge ok">-</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Notifikasi</div>
+
+  <!-- MQTT.js -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script>
+    (function() {
+      // ==================== FEED CALCULATOR ====================
+      function getPhase(age) {
+        if (age >= 1 && age <= 14) return { name: 'Starter', fr: 12.5, frMin: 10, frMax: 15 };
+        if (age >= 15 && age <= 28) return { name: 'Early Grower', fr: 9, frMin: 8, frMax: 10 };
+        if (age >= 29 && age <= 56) return { name: 'Grower', fr: 6, frMin: 4, frMax: 8 };
+        if (age >= 57 && age <= 105) return { name: 'Finisher', fr: 3, frMin: 2, frMax: 4 };
+        return { name: 'Unknown', fr: 0, frMin: 0, frMax: 0 };
+      }
+
+      window.calculateFeed = function() {
+        const age = parseInt(document.getElementById('shrimpAge').value) || 30;
+        const population = parseInt(document.getElementById('shrimpPopulation').value) || 1000;
+        const weight = parseFloat(document.getElementById('shrimpWeight').value) || 5;
+
+        // Get phase
+        const phase = getPhase(age);
+        
+        // Calculate Biomassa (Kg)
+        const biomass = (population * weight) / 1000;
+        
+        // Calculate Daily Feed (Kg)
+        const dailyFeed = biomass * (phase.fr / 100);
+        
+        // Calculate Feed per Feeding (assuming 3x feeding per day)
+        const feedPerFeeding = dailyFeed / 3;
+
+        // Calculate recommended target (in grams)
+        const targetGrams = Math.round(feedPerFeeding * 1000);
+
+        // Update display
+        document.getElementById('displayAge').textContent = age;
+        document.getElementById('displayPhase').textContent = phase.name;
+        document.getElementById('displayPhase').style.background = 
+          phase.name === 'Starter' ? '#2f9e44' :
+          phase.name === 'Early Grower' ? '#0f8b8d' :
+          phase.name === 'Grower' ? '#d9822b' : '#d64545';
+        
+        document.getElementById('displayPopulation').textContent = population.toLocaleString();
+        document.getElementById('displayWeight').textContent = weight.toFixed(1);
+        document.getElementById('displayBiomass').textContent = biomass.toFixed(2);
+        document.getElementById('displayFR').textContent = phase.fr.toFixed(1);
+        document.getElementById('displayDailyFeed').textContent = dailyFeed.toFixed(2);
+        document.getElementById('displayPerFeed').textContent = feedPerFeeding.toFixed(2);
+        document.getElementById('displayTarget').textContent = targetGrams;
+
+        // Update target input
+        document.getElementById('targetInput').value = targetGrams;
+      };
+
+      // ==================== STATE ====================
+      const state = {
+        target: 100,
+        currentWeight: 0,
+        encoderCount: 0,
+        motorOpen: false,
+        ssrOn: false,
+        servoCmd: 0,
+        isFeeding: false,
+        feedingStage: 0,
+        simInterval: null,
+        blowInterval: null,
+        schedules: [],
+        triggeredKeys: new Set(),
+        mqttClient: null,
+        mqttConnected: false,
+        topicPrefix: 'shrimp/feeder',
+        modeOnline: false
+      };
+
+      // ==================== DOM ELEMENTS ====================
+      const $ = (id) => document.getElementById(id);
+      const els = {
+        mqttDot: $('mqttDot'), mqttStatus: $('mqttStatus'),
+        weight: $('weightVal'), note: $('weightNote'), encoderVal: $('encoderVal'),
+        target: $('targetInput'), saveT: $('saveTargetBtn'),
+        btnMotor: $('btnMotor'), btnSSR: $('btnSSR'), btnServo: $('btnServo'),
+        scheduleBox: $('scheduleBox'), toggleSched: $('toggleSched'),
+        schedTime: $('schedTime'), addS: $('addSchedBtn'), schedList: $('schedList'),
+        feedBtn: $('feedBtn'), progressWrap: $('progressWrap'), progFill: $('progFill'), progPct: $('progPercent'),
+        stMotor: $('stMotor'), stLoad: $('stLoad'), stServo: $('stServo'), stSSR: $('stSSR'),
+        hist: $('historyList'), toast: $('toast'),
+        steps: {1:$('step1'),2:$('step2'),3:$('step3'),4:$('step4')},
+        servoIcon: $('servoIcon'),
+        flowServoIcon: $('flowServoIcon'),
+        statusServoIcon: $('statusServoIcon'),
+        mqttConnectBtn: $('mqttConnectBtn')
+      };
+
+      const pad = (n) => String(n).padStart(2, '0');
+      const getDayName = (i) => ['Min','Sen','Sel','Rab','Kam','Jum','Sab'][i];
+
+      // ==================== SERVO ANIMATION ====================
+      function updateServoAnimation(angle) {
+        const servoElements = [
+          els.servoIcon?.querySelector('.servo-svg'),
+          els.flowServoIcon?.querySelector('.servo-svg'),
+          els.statusServoIcon?.querySelector('.servo-svg')
+        ];
+
+        servoElements.forEach(svg => {
+          if (svg) {
+            if (angle === 50) {
+              svg.classList.add('active');
+            } else {
+              svg.classList.remove('active');
+            }
+          }
+        });
+      }
+
+      // ==================== MQTT CONNECTION ====================
+      function connectMQTT() {
+        if (state.mqttConnected) {
+          disconnectMQTT();
+          return;
+        }
+
+        const broker = 'broker.emqx.io';
+        const port = 8084;
+        const prefix = 'shrimp/feeder';
+        state.topicPrefix = prefix;
+
+        const wsUrl = `wss://${broker}:${port}/mqtt`;
+        state.mqttClient = mqtt.connect(wsUrl, {
+          clientId: 'web_feeder_' + Math.random().toString(16).substr(2, 8),
+          clean: true,
+          reconnectPeriod: 5000
+        });
+
+        state.mqttClient.on('connect', () => {
+          state.mqttConnected = true;
+          state.modeOnline = true;
+          updateMQTTUI(true);
+          state.mqttClient.subscribe(`${prefix}/state`);
+          state.mqttClient.subscribe(`${prefix}/encoder`);
+          state.mqttClient.subscribe(`${prefix}/weight`);
+          showToast('✅ Terhubung ke MQTT Broker!', 'success');
+          publishCmd({ action: 'get_status' });
+        });
+
+        state.mqttClient.on('message', (topic, message) => {
+          try {
+            const payload = JSON.parse(message.toString());
+            handleMQTTMessage(topic, payload);
+          } catch (e) {
+            console.log('MQTT raw:', message.toString());
+          }
+        });
+
+        state.mqttClient.on('close', () => {
+          state.mqttConnected = false;
+          state.modeOnline = false;
+          updateMQTTUI(false);
+          showToast('⚠️ MQTT Disconnected', 'error');
+        });
+
+        state.mqttClient.on('error', (err) => {
+          console.error('MQTT Error:', err);
+          showToast('❌ MQTT Error: ' + err.message, 'error');
+        });
+      }
+
+      function disconnectMQTT() {
+        if (state.mqttClient) {
+          state.mqttClient.end(true);
+          state.mqttClient = null;
+          state.mqttConnected = false;
+          state.modeOnline = false;
+          updateMQTTUI(false);
+          showToast('🔌 MQTT Disconnected', 'info');
+        }
+      }
+
+      function publishCmd(cmd) {
+        if (!state.mqttClient || !state.mqttConnected) {
+          showToast('⚠️ MQTT tidak terhubung! Hardware dalam mode manual.', 'error');
+          return false;
+        }
+        const topic = `${state.topicPrefix}/cmd`;
+        state.mqttClient.publish(topic, JSON.stringify(cmd));
+        console.log('📤 Publish:', topic, cmd);
+        return true;
+      }
+
+      function handleMQTTMessage(topic, payload) {
+        if (topic.endsWith('/weight')) {
+          state.currentWeight = parseFloat(payload.weight) || 0;
+          els.weight.textContent = Math.round(state.currentWeight);
+          updateWeightDisplay();
+        } else if (topic.endsWith('/encoder')) {
+          state.encoderCount = parseInt(payload.count) || 0;
+          els.encoderVal.textContent = state.encoderCount;
+          updateMotorUI();
+        } else if (topic.endsWith('/state')) {
+          if (payload.weight !== undefined) {
+            state.currentWeight = parseFloat(payload.weight) || 0;
+            els.weight.textContent = Math.round(state.currentWeight);
+          }
+          if (payload.encoder !== undefined) {
+            state.encoderCount = parseInt(payload.encoder) || 0;
+            els.encoderVal.textContent = state.encoderCount;
+          }
+          if (payload.motor !== undefined) {
+            state.motorOpen = payload.motor === 1 || payload.motor === true;
+            updateMotorUI();
+          }
+          if (payload.ssr !== undefined) {
+            state.ssrOn = payload.ssr === 1 || payload.ssr === true;
+            updateSSRUI();
+          }
+          if (payload.servo !== undefined) {
+            state.servoCmd = parseInt(payload.servo) || 0;
+            updateServoUI();
+          }
+          updateWeightDisplay();
+          updateComponentStatus();
+        }
+      }
+
+      function updateMQTTUI(connected) {
+        els.mqttDot.classList.toggle('disconnected', !connected);
+        els.mqttStatus.textContent = connected ? 'MQTT Connected' : 'MQTT Disconnected';
+        
+        if (els.mqttConnectBtn) {
+          els.mqttConnectBtn.textContent = connected ? '🔌 Disconnect' : '🔌 Connect';
+          els.mqttConnectBtn.className = connected ? 'btn btn-disconnect btn-sm' : 'btn btn-connect btn-sm';
+        }
+      }
+
+      // ==================== UI UPDATES ====================
+      function updateMotorUI() {
+        els.btnMotor.textContent = state.motorOpen ? 'TUTUP' : 'BUKA';
+        els.btnMotor.classList.toggle('on', state.motorOpen);
+        els.btnMotor.classList.toggle('off', !state.motorOpen);
+        els.stMotor.textContent = state.motorOpen ? 'Terbuka' : 'Tertutup';
+        els.stMotor.className = 'comp-value ' + (state.motorOpen ? 'ok' : 'off');
+      }
+
+      function updateSSRUI() {
+        els.btnSSR.textContent = state.ssrOn ? 'ON' : 'OFF';
+        els.btnSSR.classList.toggle('on', state.ssrOn);
+        els.btnSSR.classList.toggle('off', !state.ssrOn);
+        els.stSSR.textContent = state.ssrOn ? 'ON' : 'OFF';
+        els.stSSR.className = 'comp-value ' + (state.ssrOn ? 'ok' : 'off');
+      }
+
+      function updateServoUI() {
+        els.btnServo.textContent = state.servoCmd === 50 ? 'BUKA (50°)' : 'TUTUP (0°)';
+        els.btnServo.classList.toggle('on', state.servoCmd === 50);
+        els.btnServo.classList.toggle('off', state.servoCmd !== 50);
+        els.stServo.textContent = state.servoCmd + '°';
+        els.stServo.className = 'comp-value ' + (state.servoCmd === 50 ? 'ok' : 'off');
+        updateServoAnimation(state.servoCmd);
+      }
+
+      function updateWeightDisplay() {
+        if (state.currentWeight < 10) {
+          els.note.textContent = 'Loadcell kosong / stabil';
+        } else if (state.isFeeding && state.currentWeight >= state.target) {
+          els.note.textContent = 'Target tercapai!';
+        } else if (state.isFeeding) {
+          els.note.textContent = 'Menimbang...';
+        }
+        els.stLoad.textContent = Math.round(state.currentWeight) + ' g';
+      }
+
+      function updateComponentStatus() {
+        updateMotorUI();
+        updateSSRUI();
+        updateServoUI();
+        updateWeightDisplay();
+      }
+
+      // ==================== KONTROL HARDWARE ====================
+      function sendMotorCommand() {
+        const newState = !state.motorOpen;
+        if (state.mqttConnected) {
+          publishCmd({ action: 'motor', value: newState ? 1 : 0 });
+        } else {
+          state.motorOpen = newState;
+          updateMotorUI();
+          showToast(`Motor ${newState ? 'BUKA' : 'TUTUP'} (manual offline)`, 'info');
+        }
+      }
+
+      function sendSSRCommand() {
+        const newState = !state.ssrOn;
+        if (state.mqttConnected) {
+          publishCmd({ action: 'ssr', value: newState ? 1 : 0 });
+        } else {
+          state.ssrOn = newState;
+          updateSSRUI();
+          showToast(`SSR ${newState ? 'ON' : 'OFF'} (manual offline)`, 'info');
+        }
+      }
+
+      function sendServoCommand() {
+        const newAngle = state.servoCmd === 50 ? 0 : 50;
+        if (state.mqttConnected) {
+          publishCmd({ action: 'servo', value: newAngle });
+        } else {
+          state.servoCmd = newAngle;
+          updateServoUI();
+          showToast(`Servo ${newAngle}° (manual offline)`, 'info');
+        }
+      }
+
+      // ==================== AUTO FEEDING SEQUENCE ====================
+      function startFeedingSequence() {
+        if (state.isFeeding) return;
+        const target = parseInt(els.target.value);
+        if (isNaN(target) || target < 50) return showToast('Target minimal 50 gram', 'error');
+        state.target = target;
+
+        state.isFeeding = true;
+        state.feedingStage = 1;
+        els.progressWrap.classList.add('active');
+        updateStep(1);
+        els.note.textContent = 'Sequence: Motor buka katup...';
+
+        if (state.mqttConnected) {
+          publishCmd({ action: 'motor', value: 1 });
+        } else {
+          state.motorOpen = true;
+          updateMotorUI();
+        }
+
+        showToast('Mulai Feeding...', 'info');
+
+        setTimeout(() => {
+          if (!state.isFeeding) return;
+          state.feedingStage = 2;
+          updateStep(2);
+          els.note.textContent = 'Menimbang pakan...';
+
+          if (!state.mqttConnected) {
+            state.simInterval = setInterval(() => {
+              if (!state.isFeeding) { clearInterval(state.simInterval); return; }
+              state.currentWeight += 20;
+              if (state.currentWeight >= state.target) {
+                state.currentWeight = state.target;
+                els.weight.textContent = Math.round(state.currentWeight);
+                updateProg();
+                clearInterval(state.simInterval);
+                completeWeighing();
+              }
+              els.weight.textContent = Math.round(state.currentWeight);
+              updateProg();
+            }, 150);
+          } else {
+            checkWeightFromHardware();
+          }
+        }, 2000);
+      }
+
+      function checkWeightFromHardware() {
+        if (!state.isFeeding) return;
+        if (state.currentWeight >= state.target) {
+          completeWeighing();
+        } else {
+          setTimeout(checkWeightFromHardware, 300);
+        }
+      }
+
+      function completeWeighing() {
+        state.feedingStage = 3;
+        updateStep(3);
+        
+        if (state.mqttConnected) {
+          publishCmd({ action: 'motor', value: 0 });
+        } else {
+          state.motorOpen = false;
+          updateMotorUI();
+        }
+
+        showToast('✅ Berat tercapai! Motor tutup, servo buka...', 'success');
+
+        setTimeout(() => {
+          if (state.mqttConnected) {
+            publishCmd({ action: 'servo', value: 50 });
+          } else {
+            state.servoCmd = 50;
+            updateServoUI();
+          }
+
+          setTimeout(() => {
+            state.feedingStage = 4;
+            updateStep(4);
+            if (state.mqttConnected) {
+              publishCmd({ action: 'ssr', value: 1 });
+            } else {
+              state.ssrOn = true;
+              updateSSRUI();
+            }
+            showToast('💨 Blower ON, meniup pakan...', 'info');
+
+            if (!state.mqttConnected) {
+              state.blowInterval = setInterval(() => {
+                state.currentWeight -= 30;
+                if (state.currentWeight <= 0) {
+                  state.currentWeight = 0;
+                  els.weight.textContent = '0';
+                  clearInterval(state.blowInterval);
+                  finishSequence();
+                }
+                els.weight.textContent = Math.round(Math.max(0, state.currentWeight));
+              }, 200);
+            } else {
+              waitForEmptyLoadcell();
+            }
+          }, 1500);
+        }, 1000);
+      }
+
+      function waitForEmptyLoadcell() {
+        if (!state.isFeeding) return;
+        if (state.currentWeight <= 5) {
+          finishSequence();
+        } else {
+          setTimeout(waitForEmptyLoadcell, 300);
+        }
+      }
+
+      function finishSequence() {
+        if (state.mqttConnected) {
+          publishCmd({ action: 'ssr', value: 0 });
+          setTimeout(() => publishCmd({ action: 'servo', value: 0 }), 500);
+        } else {
+          state.ssrOn = false;
+          state.servoCmd = 0;
+          updateSSRUI();
+          updateServoUI();
+        }
+
+        state.isFeeding = false;
+        state.feedingStage = 0;
+        els.progressWrap.classList.remove('active');
+        updateComponentStatus();
+        els.note.textContent = 'Selesai • Sistem siap';
+        showToast('✅ Feeding selesai!', 'success');
+        addHistory(state.target);
+        resetFlowUI();
+      }
+
+      function updateStep(s) {
+        Object.values(els.steps).forEach(e => e.classList.remove('active', 'done'));
+        for (let i = 1; i < s; i++) els.steps[i]?.classList.add('done');
+        if (s <= 4) els.steps[s]?.classList.add('active');
+      }
+
+      function updateProg() {
+        const p = Math.min(100, Math.round((state.currentWeight / state.target) * 100));
+        els.progFill.style.width = p + '%';
+        els.progPct.textContent = p + '%';
+      }
+
+      function resetFlowUI() {
+        Object.values(els.steps).forEach(e => e.classList.remove('active', 'done'));
+        els.progFill.style.width = '0%';
+        els.progPct.textContent = '0%';
+      }
+
+      // ==================== SCHEDULE ====================
+      els.toggleSched.onclick = () => {
+        els.scheduleBox.classList.toggle('active');
+        els.toggleSched.textContent = els.scheduleBox.classList.contains('active') ? '📅 Sembunyikan Jadwal' : '📅 Tampilkan Jadwal';
+      };
+
+      els.addS.onclick = () => {
+        const t = els.schedTime.value;
+        if (!t) return showToast('Pilih jam', 'error');
+        const days = Array.from(document.querySelectorAll('.day-checks input:checked')).map(c => parseInt(c.value));
+        if (days.length === 0) return showToast('Pilih minimal 1 hari', 'error');
+        state.schedules.push({ id: Date.now(), time: t, days, active: true });
+        state.schedules.sort((a, b) => a.time.localeCompare(b.time));
+        renderSchedules();
+        showToast('✓ Jadwal ditambahkan', 'success');
+      };
+
+      function renderSchedules() {
+        els.schedList.innerHTML = state.schedules.length === 0 
+          ? '<div style="color:var(--muted);font-size:12px;text-align:center;">Belum ada jadwal</div>'
+          : state.schedules.map(s => `
+            <div class="schedule-item">
+              <span><b>${s.time}</b> • ${s.days.map(getDayName).join(', ')}</span>
+              <button class="btn btn-sm" onclick="this.closest('.schedule-item').remove()" style="color:var(--red);">✕</button>
+            </div>`).join('');
+      }
+      renderSchedules();
+
+      // ==================== EVENT LISTENERS ====================
+      els.mqttConnectBtn.onclick = connectMQTT;
+      els.btnMotor.onclick = sendMotorCommand;
+      els.btnSSR.onclick = sendSSRCommand;
+      els.btnServo.onclick = sendServoCommand;
+      els.feedBtn.onclick = startFeedingSequence;
+      els.saveT.onclick = () => {
+        const v = parseInt(els.target.value);
+        if (isNaN(v) || v < 50) return showToast('Target 50-10000 gram', 'error');
+        state.target = v;
+        showToast('✓ Target: ' + v + ' gram', 'success');
+      };
+
+      // ==================== HISTORY ====================
+      function addHistory(weight) {
+        const now = new Date();
+        const div = document.createElement('div');
+        div.className = 'history-item';
+        div.innerHTML = `<div>${pad(now.getHours())}:${pad(now.getMinutes())}</div><span>${weight} g</span><span class="badge ok">✓</span>`;
+        els.hist.insertBefore(div, els.hist.firstChild);
+        if (els.hist.children.length > 5) els.hist.removeChild(els.hist.lastChild);
+        if (els.hist.children[0]?.textContent?.includes('Belum ada')) els.hist.innerHTML = '';
+      }
+
+      // ==================== TOAST ====================
+      function showToast(msg, type = 'info') {
+        els.toast.textContent = msg;
+        els.toast.className = `toast ${type} show`;
+        setTimeout(() => els.toast.classList.remove('show'), 3000);
+      }
+
+      // ==================== CLOCK ====================
+      setInterval(() => {
+        const now = new Date();
+        const clockEl = document.getElementById('ntpClock');
+        if (clockEl) clockEl.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+        
+        if (state.schedules.length > 0 && !state.isFeeding) {
+          const currentTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+          const currentDay = now.getDay();
+          state.schedules.forEach(s => {
+            if (s.active && s.time === currentTime && s.days.includes(currentDay)) {
+              const dateKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+              const key = `${s.id}_${dateKey}`;
+              if (!state.triggeredKeys.has(key)) {
+                state.triggeredKeys.add(key);
+                showToast('⏰ Jadwal feeding: ' + s.time, 'info');
+                startFeedingSequence();
+              }
+            }
+          });
+        }
+      }, 1000);
+
+      // Initial calculation
+      window.calculateFeed();
+
+      // Initial UI
+      updateMQTTUI(false);
+      updateMotorUI();
+      updateSSRUI();
+      updateServoUI();
+      els.encoderVal.textContent = '-';
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "state": {
+    "weight": 0,
+    "encoder": 0,
+    "motor": 0,
+    "ssr": 0,
+    "servo": 0,
+    "feeding": false,
+    "stage": 0,
+    "online": false,
+    "lastSeen": 0,
+    "error": ""
+  },
+  "command": {
+    "motor": null,
+    "ssr": null,
+    "servo": null,
+    "feedNow": false,
+    "stop": false,
+    "ts": 0,
+    "by": "seed"
+  },
+  "activeSchedule": {
+    "enabled": false,
+    "startDate": "2026-06-22",
+    "offsetAge": 1,
+    "count": 1000,
+    "initialWeight": 5,
+    "feedTimes": ["07:00", "15:00", "23:00"],
+    "cycles": [
+      { "name": "Starter",  "days": 14, "fr": 15 },
+      { "name": "Early",    "days": 14, "fr": 10 },
+      { "name": "Grower",   "days": 28, "fr": 8 },
+      { "name": "Finisher", "days": 56, "fr": 4 }
+    ]
+  }
+}
