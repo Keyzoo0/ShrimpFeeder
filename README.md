@@ -1,160 +1,314 @@
 <div align="center">
 
-<img src="udang_website/public/logo-polinema.png" height="84" alt="Politeknik Negeri Malang" />&nbsp;&nbsp;&nbsp;<img src="udang_website/public/logo-elektro.png" height="84" alt="Teknik Elektro" />
+<img src="udang_website/public/logo-polinema.png" height="88" alt="Politeknik Negeri Malang" />&nbsp;&nbsp;&nbsp;<img src="udang_website/public/logo-elektro.png" height="88" alt="Teknik Elektro" />
 
-# Smart Shrimp Feeder
+# 🦐 Smart Shrimp Feeder
 
-**Alat Penakar Pakan Udang Otomatis Berbasis IoT**
-Dashboard web realtime + firmware ESP32 dual-core, terhubung lewat Firebase.
+### Alat Penakar Pakan Udang Otomatis Berbasis IoT
 
-[![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)](https://nextjs.org)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
-[![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-components-111827)](https://ui.shadcn.com)
-[![Firebase](https://img.shields.io/badge/Firebase-Auth%20%7C%20RTDB%20%7C%20Firestore-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com)
+**Penakaran pakan menyesuaikan umur udang, divalidasi sensor berat (load cell), dikendalikan ESP32 dual-core, dipantau real-time lewat dashboard web.**
+
+<br/>
+
+[![Live Demo](https://img.shields.io/badge/▲%20Live%20Demo-shrimpfeeder--ebon.vercel.app-22c55e?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
+[![GitHub](https://img.shields.io/badge/GitHub-Keyzoo0%2FShrimpFeeder-181717?logo=github&logoColor=white)](https://github.com/Keyzoo0/ShrimpFeeder)
+
+[![Next.js](https://img.shields.io/badge/Next.js-14.2-black?logo=next.js)](https://nextjs.org)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=white)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-Radix-111827)](https://ui.shadcn.com)
+[![Firebase](https://img.shields.io/badge/Firebase-Auth%20·%20RTDB%20·%20Firestore-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com)
 [![ESP32](https://img.shields.io/badge/ESP32-Dual--Core%20FreeRTOS-E7352C?logo=espressif&logoColor=white)](https://www.espressif.com)
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-000000?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
+[![Deploy](https://img.shields.io/badge/Deployed%20on-Vercel-000000?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
+![Status](https://img.shields.io/badge/status-aktif-success)
+![License](https://img.shields.io/badge/lisensi-akademik-blue)
 
-<sub>Tugas Akhir — Program Studi Sarjana Terapan Teknik Elektronika, Jurusan Teknik Elektro, Politeknik Negeri Malang</sub>
+<sub>Tugas Akhir — Program Studi Sarjana Terapan Teknik Elektronika · Jurusan Teknik Elektro · Politeknik Negeri Malang · 2026</sub>
 
 </div>
 
 ---
 
-## Daftar Isi
+## 📑 Daftar Isi
 
-- [Tentang](#tentang)
-- [Fitur](#fitur)
-- [Arsitektur Sistem](#arsitektur-sistem)
-- [Tech Stack](#tech-stack)
-- [Demo](#demo)
-- [Struktur Proyek](#struktur-proyek)
-- [Mulai Cepat](#mulai-cepat)
-- [Firmware ESP32](#firmware-esp32)
-- [Tentang Tugas Akhir](#tentang-tugas-akhir)
-- [Lisensi](#lisensi)
+- [Tentang Proyek](#-tentang-proyek)
+- [Latar Belakang, Tujuan & Manfaat](#-latar-belakang-tujuan--manfaat)
+- [Fitur Utama](#-fitur-utama)
+- [Arsitektur Sistem](#-arsitektur-sistem)
+- [Cara Kerja Sistem (State Machine Feeding)](#-cara-kerja-sistem-state-machine-feeding)
+- [Skema Penjadwalan Pakan (4 Siklus)](#-skema-penjadwalan-pakan-4-siklus)
+- [Tech Stack](#-tech-stack)
+- [Struktur Data (Firebase)](#-struktur-data-firebase)
+- [Demo](#-demo)
+- [Struktur Proyek](#-struktur-proyek)
+- [Mulai Cepat](#-mulai-cepat)
+- [Environment Variables](#-environment-variables)
+- [Skrip NPM](#-skrip-npm)
+- [Firmware ESP32 (Dual-Core)](#-firmware-esp32-dual-core)
+- [Pin Mapping & Bill of Materials](#-pin-mapping--bill-of-materials)
+- [Model Keamanan](#-model-keamanan)
+- [Deployment](#-deployment)
+- [Profil Penyusun (Info Mahasiswa)](#-profil-penyusun-info-mahasiswa)
+- [Tentang Tugas Akhir](#-tentang-tugas-akhir)
+- [Lisensi & Atribusi](#-lisensi--atribusi)
 
 ---
 
-## Tentang
+## 🎯 Tentang Proyek
 
-**Smart Shrimp Feeder** adalah sistem penakar pakan udang otomatis yang menyesuaikan porsi pakan berdasarkan **umur udang**, menggunakan **sensor berat (load cell + HX711)** untuk validasi takaran secara real-time. Alat dikendalikan oleh **ESP32 dual-core** dan terhubung ke **Firebase** sehingga dapat dipantau & dikendalikan dari mana saja lewat **dashboard web** — termasuk kontrol manual, penjadwalan otomatis 4 siklus per hari, riwayat pemberian pakan, dan status alat secara realtime.
+**Smart Shrimp Feeder** adalah sistem penakar pakan udang otomatis yang menyesuaikan porsi pakan berdasarkan **umur udang**. Sistem menghitung kebutuhan pakan harian dari **biomassa** (jumlah udang × berat per ekor) dikalikan **Feeding Rate (FR)** sesuai fase pertumbuhan, lalu memvalidasi takaran yang keluar memakai **sensor berat (load cell + HX711)** secara real-time.
 
-Proyek ini dibangun untuk mendukung efisiensi pakan pada budidaya udang, mengurangi pemborosan pakan akibat penakaran manual yang tidak konsisten.
+Otak alat adalah **ESP32 dual-core**: satu core khusus mengurus jaringan/IoT, satu core khusus mengontrol hardware real-time — sehingga koneksi internet yang lambat **tidak pernah** membekukan motor atau tombol darurat. Seluruh data dipertukarkan dengan **Firebase** (Authentication, Realtime Database, Firestore) sehingga alat dapat dipantau & dikendalikan dari mana saja lewat **dashboard web**.
 
-## Fitur
+> 💡 **Inti inovasi:** porsi pakan otomatis menyesuaikan umur/fase udang + verifikasi takaran oleh sensor berat → mengurangi pemborosan pakan akibat penakaran manual yang tidak konsisten.
 
-- **Kontrol manual realtime** — motor, servo gate, dan blower dapat dikendalikan langsung dari dashboard dengan status live (online/offline alat).
-- **Penjadwalan otomatis** — 4 siklus pemberian pakan per hari, porsi pakan menyesuaikan umur udang.
-- **Riwayat pemberian pakan** — setiap event pakan tercatat (waktu, berat aktual, status) dan tersimpan di Firestore.
-- **Multi-user** — autentikasi email/password (Firebase Auth), beberapa pengguna dapat memantau alat yang sama.
-- **Tab Info Tugas Akhir** — data judul, mahasiswa, dan dosen pembimbing, dapat diedit langsung dari dashboard dan tersinkron real-time lewat Firestore.
-- **Tema Aqua Laut** — light & dark mode (toggle), didesain responsif untuk desktop maupun mobile.
-- **UI berbasis shadcn/ui** — komponen konsisten, accessible (Radix UI), dan dianimasikan halus.
+---
 
-## Arsitektur Sistem
+## 🧭 Latar Belakang, Tujuan & Manfaat
+
+### Latar Belakang
+Pada budidaya udang, pakan menyumbang porsi biaya operasional terbesar. Penakaran manual cenderung tidak konsisten — berlebih menyebabkan pemborosan & memburuknya kualitas air, kurang menyebabkan pertumbuhan tidak optimal. Dibutuhkan sistem yang menakar pakan secara **terukur, terjadwal, dan terverifikasi**.
+
+### Tujuan
+- Merancang alat penakar pakan udang otomatis yang **porsinya menyesuaikan umur udang**.
+- Memanfaatkan **sensor berat** sebagai validasi takaran agar dosis akurat.
+- Mengintegrasikan alat dengan **IoT** untuk monitoring & kontrol jarak jauh secara real-time.
+
+### Manfaat
+- ⚖️ **Akurasi** — dosis pakan dihitung dari biomassa & FR, diverifikasi load cell.
+- 💰 **Efisiensi** — meminimalkan pemborosan pakan & menjaga kualitas air.
+- ⏱️ **Konsistensi** — penjadwalan otomatis beberapa kali sehari tanpa intervensi manual.
+- 🌐 **Aksesibilitas** — pantau & kendalikan dari mana saja lewat web.
+
+---
+
+## ✨ Fitur Utama
+
+| Kategori | Fitur |
+|---|---|
+| **Monitoring** | Berat load cell realtime, status motor/servo/blower, encoder, indikator online/offline alat, tahap proses feeding |
+| **Kontrol Manual** | Buka/tutup motor katup, ON/OFF SSR blower, buka/tutup servo gate, tombol **Mulai/Stop Feeding** |
+| **Penjadwalan Otomatis** | Tanggal mulai, offset umur, jumlah udang, berat awal/ekor, jam makan (default 3×/hari), 4 siklus pertumbuhan yang bisa diedit |
+| **Perhitungan Pakan** | Setpoint per-feed dihitung otomatis dari biomassa × FR, tabel harian sepanjang masa tebar |
+| **Riwayat** | Catatan tiap event pakan (waktu, berat aktual vs setpoint, siklus, trigger) tersimpan di Firestore |
+| **Multi-user** | Autentikasi email/password (Firebase Auth), beberapa pengguna memantau alat yang sama (last-write-wins) |
+| **Info Tugas Akhir** | Data judul, mahasiswa & dosen pembimbing dapat diedit langsung dari dashboard, tersinkron realtime |
+| **UX** | Tema Aqua Laut light/dark, responsif (mobile-first), komponen shadcn/ui aksesibel, notifikasi toast |
+
+---
+
+## 🏗️ Arsitektur Sistem
 
 ```mermaid
 flowchart LR
-    subgraph Web["Dashboard Web (Next.js)"]
-        UI[Monitoring / Kontrol / Jadwal / Riwayat / Info]
+    subgraph Web["🖥️ Dashboard Web — Next.js"]
+        UI[Monitoring · Kontrol · Jadwal · Riwayat · Info]
     end
 
-    subgraph FB["Firebase"]
+    subgraph FB["☁️ Firebase"]
         AUTH[Authentication]
-        RTDB[(Realtime Database\nstate · command · schedule)]
-        FS[(Firestore\nfeedHistory · schedulePlans · siteContent)]
+        RTDB[("Realtime Database<br/>state · command · activeSchedule · feedEvents")]
+        FS[("Firestore<br/>siteContent · schedulePlans · feedHistory · users")]
     end
 
-    subgraph Device["ESP32 — Dual Core FreeRTOS"]
-        NET["netTask (Core 0)\nWiFi · HTTP REST · Auth Token"]
-        SYS["sysTask (Core 1)\nHX711 · Motor BTS7960 · Servo · SSR · LCD · Tombol"]
+    subgraph Device["🔌 ESP32 — Dual Core FreeRTOS"]
+        NET["netTask · Core 0 (PRO_CPU)<br/>WiFi · NTP · Auth Token · REST"]
+        SYS["sysTask · Core 1 (APP_CPU)<br/>HX711 · Motor · Servo · SSR · LCD · Tombol"]
         NET <-->|Queue & Mutex| SYS
     end
 
     UI <-->|onValue / set| RTDB
     UI <-->|onSnapshot / setDoc| FS
     UI -->|signIn| AUTH
-    NET <-->|GET/PUT/POST REST API| RTDB
-    NET -->|POST feedEvents| FS
-    SYS -->|Berat aktual| NET
+    NET -->|GET /command| RTDB
+    NET -->|PUT /state| RTDB
+    NET -->|GET /activeSchedule| RTDB
+    NET -->|POST /feedEvents| RTDB
+    SYS -->|berat aktual & stage| NET
 ```
 
-Komunikasi alat ↔ cloud memakai **REST API JSON murni** (tanpa SDK Firebase di firmware) agar ringan di mikrokontroler. Beban kerja ESP32 dipisah ke dua core agar request jaringan yang lambat tidak pernah membekukan kontrol motor / emergency stop.
+Komunikasi alat ↔ cloud memakai **REST API JSON murni** (tanpa SDK Firebase di firmware) agar ringan di mikrokontroler. Beban ESP32 dipisah ke dua core supaya request jaringan yang lambat tidak pernah membekukan kontrol motor / emergency stop / pembacaan tombol.
 
-## Tech Stack
+---
+
+## ⚙️ Cara Kerja Sistem (State Machine Feeding)
+
+Proses satu siklus pemberian pakan dijalankan sebagai **state machine** di `sysTask` (Core 1). Nilai `stage` ini dikirim ke `/state` dan ditampilkan di dashboard sebagai progress.
+
+| Stage | Label | Aksi |
+|:---:|---|---|
+| 0 | **Idle** | Menunggu jadwal / perintah manual |
+| 1 | **Motor Buka** | Motor BTS7960 membuka katup (target encoder `POSISI_BUKA`) |
+| 2 | **Timbang** | Load cell HX711 menimbang pakan yang turun sampai mencapai setpoint |
+| 3 | **Motor Tutup** | Katup ditutup kembali (target encoder `POSISI_TUTUP`) |
+| 4 | **Servo Tutup** | Servo gate memastikan posisi tertutup |
+| 5 | **Blower** | SSR menyalakan blower untuk meniup/menyebar pakan |
+| 6 | **Buka Gate** | Servo gate membuka untuk menjatuhkan pakan |
+| 7 | **Dispense** | Pakan dikeluarkan sampai wadah kosong (di bawah `EMPTY_THRESHOLD`) |
+| 8 | **Selesai** | Event dicatat → `POST /feedEvents`, kembali ke Idle |
+
+**Pengaman (safety timeout):** gerak motor dibatasi `MOTOR_MOVE_TIMEOUT` (8 dtk), proses timbang `WEIGH_TIMEOUT` (60 dtk), pengosongan `EMPTY_TIMEOUT` (30 dtk). Perintah **Stop** dari dashboard memutus proses kapan pun lewat flag atomik `g_stopRequested`.
+
+---
+
+## 📊 Skema Penjadwalan Pakan (4 Siklus)
+
+Pakan dihitung berdasarkan **fase pertumbuhan udang**. Setiap fase punya durasi (hari) dan **Feeding Rate (FR)** berbeda (default — dapat diedit di dashboard):
+
+| Siklus | Durasi (hari) | FR (%) | Keterangan |
+|---|:---:|:---:|---|
+| 🟢 **Starter** | 14 | 15% | Pasca tebar, kebutuhan relatif tinggi |
+| 🔵 **Early** | 14 | 10% | Pertumbuhan awal |
+| 🟠 **Grower** | 28 | 8% | Fase pembesaran |
+| 🔴 **Finisher** | 56 | 4% | Menjelang panen |
+| | **Total 112 hari** | | Masa tebar default |
+
+**Jam makan default:** `07:00 · 15:00 · 23:00` (3× sehari).
+
+### Rumus perhitungan dosis
+
+```
+Biomassa total (g)      = berat_awal_per_ekor (g) × jumlah_udang (ekor)
+Pakan harian (g)        = Biomassa × FR(%) ÷ 100
+Setpoint per feed (g)   = Pakan harian ÷ jumlah_jam_makan
+```
+
+> **Contoh:** 1000 ekor × 5 g = 5.000 g biomassa. Fase Starter (FR 15%) → 750 g/hari ÷ 3 jam makan = **250 g per feed**.
+
+Dashboard juga membangun **tabel harian** untuk seluruh masa tebar (umur → siklus → setpoint per hari) sehingga peternak bisa melihat proyeksi pakan dari awal hingga panen.
+
+---
+
+## 🧱 Tech Stack
 
 | Layer | Teknologi |
 |---|---|
-| **Frontend** | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS, shadcn/ui (Radix UI), lucide-react, next-themes, sonner |
-| **Backend / Cloud** | Firebase Authentication, Realtime Database, Firestore |
-| **Firmware** | ESP32 (Arduino C++), FreeRTOS dual-core, ArduinoJson, HX711, ESP32Servo, LiquidCrystal_I2C |
-| **Hardware** | Load cell + HX711, motor DC + driver BTS7960 + encoder, servo gate, SSR + blower, LCD 16×2 I2C, push button |
-| **Deployment** | Vercel |
+| **Frontend** | Next.js `14.2.15` (App Router) · React `18.3.1` · TypeScript `5.5` · Tailwind CSS `3.4` |
+| **UI** | shadcn/ui (Radix UI: dialog, label, separator, slot, switch, tabs) · lucide-react · next-themes · sonner (toast) · class-variance-authority · tailwind-merge |
+| **Cloud / Backend** | Firebase `11.1` — Authentication · Realtime Database · Cloud Firestore |
+| **Firmware** | ESP32 (Arduino C++) · FreeRTOS dual-core · ArduinoJson v6 · HX711 · ESP32Servo · LiquidCrystal_I2C · WiFiClientSecure + HTTPClient (REST) |
+| **Hardware** | Load cell + HX711, motor DC + driver BTS7960 + encoder, servo gate, SSR + blower, LCD 16×2 I2C, 3 push button |
+| **Deployment** | Vercel (web) · Firebase (cloud) |
 
-## Demo
+---
 
-Dashboard di-deploy di Vercel — silakan login menggunakan akun yang telah didaftarkan oleh admin (tidak ada pendaftaran mandiri).
+## 🗄️ Struktur Data (Firebase)
+
+### Realtime Database (RTDB) — komunikasi cepat alat ↔ web
+
+```jsonc
+/state                 // DeviceState — ditulis alat, dibaca web
+  { weight, encoder, motor, ssr, servo, feeding,
+    stage, stageLabel, online, lastSeen, error }
+
+/command               // Command — ditulis web, dibaca alat
+  { motor, ssr, servo, feedNow, stop, ts, by }
+
+/activeSchedule        // ActiveSchedule — jadwal aktif yang dipakai alat
+  { enabled, startDate, offsetAge, count, initialWeight,
+    feedTimes: ["07:00","15:00","23:00"],
+    cycles: [{ name, days, fr }, ...] }
+
+/feedEvents/{pushId}   // FeedEvent — log tiap pemberian pakan
+  { ts, setpoint, delivered, cycle, trigger }
+```
+
+### Firestore — penyimpanan dokumen & arsip
+
+| Koleksi / Dokumen | Isi |
+|---|---|
+| `siteContent/thesis` | Data Tugas Akhir (judul, mahasiswa, pembimbing) — diedit dari tab Info |
+| `schedulePlans/{id}` | Arsip rencana jadwal yang disimpan, bisa dimuat ulang |
+| `feedHistory/{id}` | Mirror riwayat feeding (idempotent by id) |
+| `users/{uid}` | Profil pengguna |
+
+---
+
+## 🚀 Demo
+
+Dashboard live di Vercel — login memakai akun yang telah didaftarkan admin (tidak ada pendaftaran mandiri).
 
 <div align="center">
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-shrimpfeeder--ebon.vercel.app-22c55e?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
+### 🔗 **[shrimpfeeder-ebon.vercel.app](https://shrimpfeeder-ebon.vercel.app)**
 
 </div>
 
 <details>
-<summary><b>Pratinjau alur</b></summary>
+<summary><b>Pratinjau alur penggunaan</b></summary>
 
-1. Halaman **Login** — autentikasi email/password.
-2. Tab **Dashboard** — monitoring berat & status alat, kontrol manual, penjadwalan, riwayat pakan.
-3. Tab **Info** — data Tugas Akhir, dapat diedit lewat dialog Edit dan tersinkron Firestore di semua perangkat.
+1. **Login** — autentikasi email/password (Firebase Auth).
+2. Tab **Dashboard** — monitoring berat & status, kontrol manual, penjadwalan, riwayat pakan.
+3. Tab **Info** — data Tugas Akhir, dapat diedit lewat dialog Edit & tersinkron Firestore di semua perangkat.
 
 </details>
 
-## Struktur Proyek
+---
+
+## 📁 Struktur Proyek
 
 ```
 ramadhan_udang/
-├── docs/                            # Aset logo (Politeknik & Teknik Elektro)
+├── README.md                            # Dokumen ini
+├── docs/                                # Aset logo institusi
 ├── firmware/
-│   └── shrimp_feeder_firebase/      # Firmware ESP32 dual-core (REST API ke Firebase)
-└── udang_website/                   # Dashboard web
+│   └── shrimp_feeder_firebase/
+│       └── shrimp_feeder_firebase.ino   # Firmware ESP32 dual-core (REST ke Firebase)
+└── udang_website/                       # Dashboard web (Next.js)
     ├── app/
-    │   ├── page.tsx                 # Dashboard (monitoring, kontrol, jadwal, riwayat)
-    │   ├── info/page.tsx            # Tab Info Tugas Akhir
-    │   └── login/page.tsx           # Login
+    │   ├── page.tsx                     # Dashboard (monitoring, kontrol, jadwal, riwayat)
+    │   ├── info/page.tsx                # Tab Info Tugas Akhir (+ dialog edit)
+    │   ├── login/page.tsx               # Halaman login
+    │   ├── layout.tsx · providers.tsx   # Root layout, theme & font
+    │   └── globals.css                  # Tema Aqua Laut (token CSS light/dark)
     ├── components/
-    │   ├── AppShell.tsx             # Header, tab nav, auth-guard
-    │   ├── Monitoring.tsx, ControlPanel.tsx, ScheduleManager.tsx, History.tsx
-    │   └── ui/                      # Komponen shadcn/ui (button, card, dialog, tabs, ...)
-    ├── hooks/                       # useAuth, useRtdb
-    ├── lib/                        # firebase.ts, thesis.ts, schedule.ts, types.ts
-    ├── firebase/                   # firestore.rules, database.rules.json
-    └── public/                     # logo-polinema.png, logo-elektro.png
+    │   ├── AppShell.tsx                 # Header, tab nav, auth-guard, badge online
+    │   ├── Monitoring.tsx               # Berat realtime, flow stage, status komponen
+    │   ├── ControlPanel.tsx             # Kontrol manual + mulai/stop feeding
+    │   ├── ScheduleManager.tsx          # Penjadwalan 4 siklus + tabel harian
+    │   ├── History.tsx                  # Riwayat feeding
+    │   └── ui/                          # Komponen shadcn/ui (button, card, dialog, ...)
+    ├── hooks/
+    │   ├── useAuth.ts                   # State autentikasi
+    │   └── useRtdb.ts                   # Baca/tulis Realtime Database + sendCommand
+    ├── lib/
+    │   ├── firebase.ts                  # Inisialisasi Firebase
+    │   ├── schedule.ts                  # Logika siklus & perhitungan setpoint
+    │   ├── thesis.ts                    # Model & sinkronisasi data Tugas Akhir
+    │   ├── types.ts                     # Tipe DeviceState, Command, FeedEvent
+    │   └── utils.ts                     # Helper (cn)
+    └── firebase/
+        ├── firestore.rules              # Security rules Firestore
+        └── database.rules.json          # Security rules Realtime Database
 ```
 
-## Mulai Cepat
+---
+
+## ⚡ Mulai Cepat
 
 ```bash
-# 1. Clone
-git clone https://github.com/keyzoo0/ShrimpFeeder.git
+# 1. Clone repositori
+git clone https://github.com/Keyzoo0/ShrimpFeeder.git
 cd ShrimpFeeder/udang_website
 
 # 2. Install dependencies
 npm install
 
-# 3. Salin contoh env, isi dengan kredensial Firebase project Anda
+# 3. Siapkan environment (isi kredensial Firebase project Anda)
 cp .env.example .env.local
 
 # 4. Jalankan dev server
 npm run dev
 ```
 
-Buka `http://localhost:3000`.
+Buka **http://localhost:3000**. Build produksi: `npm run build && npm run start`.
 
-<details>
-<summary><b>Environment Variables</b></summary>
+---
+
+## 🔐 Environment Variables
+
+Salin `.env.example` → `.env.local`, lalu isi dari **Firebase Console → Project Settings → Web App**:
 
 | Variabel | Keterangan |
 |---|---|
@@ -167,38 +321,128 @@ Buka `http://localhost:3000`.
 | `NEXT_PUBLIC_FIREBASE_APP_ID` | App ID |
 | `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` | Google Analytics measurement ID |
 
-Variabel `NEXT_PUBLIC_*` Firebase Web Config bukan rahasia — keamanan data dijamin oleh Firebase Authentication & Security Rules (`firebase/firestore.rules`, `firebase/database.rules.json`), bukan oleh kerahasiaan key ini.
+> ℹ️ Variabel `NEXT_PUBLIC_*` Firebase Web Config **bukan rahasia** — keamanan data dijamin oleh Firebase Authentication & Security Rules, bukan oleh kerahasiaan key ini.
+
+---
+
+## 📜 Skrip NPM
+
+| Skrip | Fungsi |
+|---|---|
+| `npm run dev` | Jalankan dev server (hot reload) |
+| `npm run build` | Build produksi yang teroptimasi |
+| `npm run start` | Jalankan hasil build produksi |
+| `npm run lint` | Linting dengan ESLint (next/core-web-vitals) |
+
+---
+
+## 🔧 Firmware ESP32 (Dual-Core)
+
+Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_firebase). Ditulis Arduino C++, memisahkan beban ke **dua core FreeRTOS**:
+
+- **Core 0 — `netTask` (PRO_CPU):** WiFi + reconnect, NTP (WIB UTC+7), autentikasi & refresh token Firebase, lalu `GET /command`, `PUT /state`, `GET /activeSchedule`, `POST /feedEvents`. Semua lewat **REST API** (`WiFiClientSecure` + `HTTPClient` + `ArduinoJson`), tanpa SDK Firebase.
+- **Core 1 — `sysTask` (APP_CPU):** HX711 (load cell), motor DC (BTS7960 + encoder + safety timeout), servo non-blocking, blower (SSR), LCD 16×2 I2C, 3 push button, dan **state-machine feeding** + scheduler. Real-time, tidak pernah diblok jaringan.
+
+> **Aturan emas:** objek jaringan hanya disentuh Core 0; hardware (HX711/Servo/LCD/motor/SSR) hanya disentuh Core 1. Data lintas-core hanya lewat `cmdQueue`, `feedEvtQueue`, `stateMutex`, `schedMutex`, dan flag atomik (`g_fbReady`, `g_wifiOnline`, `g_stopRequested`).
+
+<details>
+<summary><b>Parameter & interval firmware</b></summary>
+
+| Parameter | Nilai default |
+|---|---|
+| Poll command | 1500 ms |
+| Push state | 2000 ms |
+| Fetch schedule | 30000 ms |
+| Refresh LCD | 500 ms |
+| Timeout gerak motor | 8000 ms |
+| Timeout timbang | 60000 ms |
+| Timeout pengosongan | 30000 ms |
+| Berat valid minimum | 50 g (di bawahnya dianggap 0) |
+| Threshold kosong | 30 g |
+| NTP server | `pool.ntp.org`, `time.google.com` |
+| Core requirement | Arduino-ESP32 core 3.x |
+
+**Library:** `ArduinoJson` v6 · `HX711` · `LiquidCrystal_I2C` · `ESP32Servo`.
 
 </details>
 
-## Firmware ESP32
+---
 
-Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_firebase) — ditulis dengan Arduino C++, memisahkan beban ke **dua core**:
+## 🔌 Pin Mapping & Bill of Materials
 
-- **Core 0 (`netTask`)** — WiFi, NTP, autentikasi & refresh token Firebase, polling command/jadwal, push state, kirim feed event. Seluruhnya lewat **REST API** (`HTTPClient` + `ArduinoJson`), tanpa SDK Firebase.
-- **Core 1 (`sysTask`)** — pembacaan HX711 (load cell), kontrol motor DC (BTS7960 + encoder), servo gate, blower (SSR), LCD I2C, push button, dan state-machine proses pemberian pakan. Real-time, tidak pernah diblok oleh jaringan.
-
-<details>
-<summary><b>Pin Mapping</b></summary>
+### Pin Mapping (ESP32)
 
 | Pin | Fungsi | Komponen |
-|---|---|---|
+|:---:|---|---|
 | 15 | DATA | HX711 (load cell) |
 | 5 | CLK | HX711 (load cell) |
-| 26 | RPWM | BTS7960 (motor DC maju) |
-| 25 | LPWM | BTS7960 (motor DC mundur) |
+| 26 | RPWM | BTS7960 (motor maju) |
+| 25 | LPWM | BTS7960 (motor mundur) |
 | 34 | ENCODER_A | Encoder posisi katup |
 | 35 | ENCODER_B | Encoder posisi katup |
 | 14 | SSR_PIN | Blower (SSR) |
-| 23 | SERVO_PIN | Servo gate |
-| 32 / 33 / 27 | PB1 / PB2 / PB3 | Push button (motor / SSR / servo) |
-| 21 / 22 | SDA / SCL | LCD 16×2 I2C |
+| 23 | SERVO_PIN | Servo gate pakan |
+| 32 | PB1 | Push button — Motor |
+| 33 | PB2 | Push button — SSR |
+| 27 | PB3 | Push button — Servo |
+| 21 / 22 | SDA / SCL | LCD 16×2 I2C (alamat `0x27`) |
 
-**Library yang dibutuhkan:** `ArduinoJson` v6, `HX711`, `LiquidCrystal_I2C`, `ESP32Servo` — Arduino-ESP32 core 3.x.
+> Konstanta tunable: `POSISI_BUKA 600`, `POSISI_TUTUP -100`, `PWM_MOTOR 100`, `TOLERANSI 5`, `SERVO_CLOSE 0°`, `SERVO_OPEN 40°`.
 
-</details>
+### Bill of Materials (komponen utama)
 
-## Tentang Tugas Akhir
+- ESP32 DevKit (mikrokontroler dual-core)
+- Load cell + modul amplifier **HX711**
+- Motor DC + driver **BTS7960** + rotary **encoder**
+- **Servo** (gate penjatuh pakan)
+- **SSR** (Solid State Relay) + **blower**
+- **LCD 16×2 I2C**
+- 3× **push button** (kontrol manual lokal)
+- Catu daya sesuai kebutuhan motor & blower
+
+---
+
+## 🛡️ Model Keamanan
+
+- **Autentikasi:** semua akses (web & alat) memerlukan login Firebase Auth. Tidak ada pendaftaran mandiri — akun dibuat admin.
+- **Realtime Database rules:** `read/write` hanya untuk `auth != null`, dengan validasi tipe pada field tertentu (mis. `ts` harus number).
+- **Firestore rules:** akses `schedulePlans`, `feedHistory`, `siteContent` butuh login; dokumen `users/{uid}` hanya bisa ditulis pemiliknya; selain itu ditolak (`deny by default`).
+- **Alat (ESP32)** memakai akun **device** khusus di Firebase Auth untuk memperoleh token, lalu mengakses REST API dengan token tersebut.
+
+---
+
+## 🌐 Deployment
+
+| Komponen | Platform | Catatan |
+|---|---|---|
+| Dashboard web | **Vercel** | Auto-build Next.js; env var Firebase di-set di Project Settings |
+| Cloud (Auth/RTDB/Firestore) | **Firebase** | Rules di-deploy via `firebase/firestore.rules` & `firebase/database.rules.json` |
+| Firmware | **ESP32** | Flash via Arduino IDE / arduino-cli (Arduino-ESP32 core 3.x) |
+
+**Live:** [https://shrimpfeeder-ebon.vercel.app](https://shrimpfeeder-ebon.vercel.app)
+
+---
+
+## 🎓 Profil Penyusun (Info Mahasiswa)
+
+<div align="center">
+
+| | |
+|---|---|
+| 👤 **Nama** | **Ramadan Putra Ariani** |
+| 🆔 **NIM** | 2241170025 |
+| 📚 **Program Studi** | Sarjana Terapan (D4) Teknik Elektronika |
+| 🏛️ **Jurusan** | Teknik Elektro |
+| 🏫 **Kampus** | Politeknik Negeri Malang (POLINEMA) |
+| 📅 **Tahun** | 2026 |
+
+</div>
+
+> Data dosen pembimbing dikelola langsung dari aplikasi pada tab **Info → Edit Data Tugas Akhir** dan tersinkron realtime lewat Firestore (`siteContent/thesis`).
+
+---
+
+## 📋 Tentang Tugas Akhir
 
 | | |
 |---|---|
@@ -208,14 +452,25 @@ Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_fire
 | **Jurusan** | Teknik Elektro |
 | **Kampus** | Politeknik Negeri Malang |
 | **Tahun** | 2026 |
-| **Dosen Pembimbing** | Lihat & kelola pada tab **Info** di dashboard (tersinkron Firestore) |
+| **Dosen Pembimbing** | Dikelola pada tab **Info** di dashboard (tersinkron Firestore) |
+| **Jenis** | Tugas Akhir / Skripsi (Sarjana Terapan) |
 
-## Lisensi
+---
 
-Proyek ini dibuat untuk keperluan **Tugas Akhir (Skripsi)** di Politeknik Negeri Malang. Silakan gunakan sebagai referensi akademik dengan mencantumkan atribusi.
+## 📄 Lisensi & Atribusi
+
+Proyek ini dibuat untuk keperluan **Tugas Akhir (Skripsi)** di Politeknik Negeri Malang. Silakan gunakan sebagai **referensi akademik** dengan mencantumkan atribusi kepada penyusun. Bukan untuk penggunaan komersial tanpa izin.
 
 ---
 
 <div align="center">
-<sub>Dibuat dengan Next.js, Firebase, dan ESP32 — Politeknik Negeri Malang, 2026.</sub>
+
+**🦐 Smart Shrimp Feeder** — dibangun dengan Next.js, Firebase & ESP32.
+
+<sub>Politeknik Negeri Malang · Jurusan Teknik Elektro · 2026</sub>
+
+<br/>
+
+[![Live Demo](https://img.shields.io/badge/▲%20Buka%20Aplikasi-shrimpfeeder--ebon.vercel.app-22c55e?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
+
 </div>
