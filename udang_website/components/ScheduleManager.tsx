@@ -179,57 +179,61 @@ export function ScheduleManager() {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex flex-col items-start gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-primary" />
+          <CalendarClock className="h-4 w-4 shrink-0 text-primary" />
           Penjadwalan Pakan (4 Siklus)
         </CardTitle>
-        <Badge variant={form.enabled ? "success" : "secondary"}>
+        <Badge variant={form.enabled ? "success" : "secondary"} className="shrink-0">
           {form.enabled ? "AUTO aktif" : "AUTO nonaktif"}
         </Badge>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Input global */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <div className="space-y-1">
-            <Label className="label-overline">Tgl Mulai</Label>
+          <div className="flex h-full flex-col gap-1">
+            <Label className="label-overline leading-tight">Tgl Mulai</Label>
             <Input
               type="date"
+              className="mt-auto"
               value={form.startDate}
               onChange={(e) => setField("startDate", e.target.value)}
             />
           </div>
-          <div className="space-y-1">
-            <Label className="label-overline">Offset Umur (hari)</Label>
+          <div className="flex h-full flex-col gap-1">
+            <Label className="label-overline leading-tight">Offset Umur (hari)</Label>
             <Input
               type="number"
               min={0}
+              className="mt-auto"
               value={form.offsetAge}
               onChange={(e) => setField("offsetAge", parseInt(e.target.value) || 0)}
             />
           </div>
-          <div className="space-y-1">
-            <Label className="label-overline">Jumlah Udang (ekor)</Label>
+          <div className="flex h-full flex-col gap-1">
+            <Label className="label-overline leading-tight">Jumlah Udang (ekor)</Label>
             <Input
               type="number"
               min={1}
+              className="mt-auto"
               value={form.count}
               onChange={(e) => setField("count", parseInt(e.target.value) || 0)}
             />
           </div>
-          <div className="space-y-1">
-            <Label className="label-overline">Berat Awal/Ekor (g)</Label>
+          <div className="flex h-full flex-col gap-1">
+            <Label className="label-overline leading-tight">Berat Awal/Ekor (g)</Label>
             <Input
               type="number"
               min={0.1}
               step={0.1}
+              className="mt-auto"
               value={form.initialWeight}
               onChange={(e) => setField("initialWeight", parseFloat(e.target.value) || 0)}
             />
           </div>
-          <div className="space-y-1">
-            <Label className="label-overline">Jam Makan</Label>
-            <div className="flex h-10 items-center truncate rounded-md border border-border bg-muted/40 px-3 text-sm font-medium">
+          <div className="flex h-full flex-col gap-1">
+            <Label className="label-overline leading-tight">Jam Makan</Label>
+            <div className="mt-auto flex h-10 items-center truncate rounded-md border border-border bg-muted/40 px-3 text-sm font-medium">
               {form.feedTimes.join(" · ")}
             </div>
           </div>
@@ -237,39 +241,39 @@ export function ScheduleManager() {
 
         {/* Tabel siklus */}
         <div className="scroll-slim overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[18rem] text-left text-xs">
             <thead className="bg-muted/50 text-muted-foreground">
               <tr>
-                <th className="px-3 py-2">Siklus</th>
-                <th className="px-3 py-2">Durasi (hari)</th>
-                <th className="px-3 py-2">FR (%)</th>
-                <th className="px-3 py-2 text-right">Setpoint/feed</th>
+                <th className="px-2 py-2 sm:px-3">Siklus</th>
+                <th className="px-2 py-2 sm:px-3">Durasi</th>
+                <th className="px-2 py-2 sm:px-3">FR (%)</th>
+                <th className="px-2 py-2 text-right sm:px-3">Setpoint</th>
               </tr>
             </thead>
             <tbody>
               {form.cycles.map((c, i) => (
                 <tr key={i} className="border-t border-border">
-                  <td className="px-3 py-2 font-semibold text-foreground">{c.name}</td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-2 font-semibold text-foreground sm:px-3">{c.name}</td>
+                  <td className="px-2 py-2 sm:px-3">
                     <Input
                       type="number"
                       min={1}
-                      className="h-8 w-24"
+                      className="h-8 w-14 sm:w-24"
                       value={c.days}
                       onChange={(e) => setCycle(i, { days: parseInt(e.target.value) || 0 })}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-2 sm:px-3">
                     <Input
                       type="number"
                       min={0}
                       step={0.5}
-                      className="h-8 w-24"
+                      className="h-8 w-14 sm:w-24"
                       value={c.fr}
                       onChange={(e) => setCycle(i, { fr: parseFloat(e.target.value) || 0 })}
                     />
                   </td>
-                  <td className="px-3 py-2 text-right font-bold tabular-nums text-primary">
+                  <td className="whitespace-nowrap px-2 py-2 text-right font-bold tabular-nums text-primary sm:px-3">
                     {Math.round(setpointPerFeed(c, form.initialWeight, form.count, feeds))} g
                   </td>
                 </tr>
@@ -303,14 +307,14 @@ export function ScheduleManager() {
         </div>
 
         {/* Aksi */}
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={saving} onClick={() => persist(true, true)}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <Button className="w-full sm:w-auto" disabled={saving} onClick={() => persist(true, true)}>
             <Check className="h-4 w-4" /> Aktifkan &amp; Simpan
           </Button>
-          <Button variant="outline" disabled={saving} onClick={() => persist(false, false)}>
+          <Button className="w-full sm:w-auto" variant="outline" disabled={saving} onClick={() => persist(false, false)}>
             <Save className="h-4 w-4" /> Simpan (nonaktif)
           </Button>
-          <Button variant="ghost" onClick={() => setShowTable((v) => !v)}>
+          <Button className="w-full sm:w-auto" variant="ghost" onClick={() => setShowTable((v) => !v)}>
             <Table2 className="h-4 w-4" />
             {showTable ? "Sembunyikan" : "Lihat"} Tabel Harian ({dailyTable.length})
           </Button>
@@ -354,13 +358,18 @@ export function ScheduleManager() {
               {plans.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs"
+                  className="flex flex-col items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
                 >
                   <span className="text-muted-foreground">
                     Mulai {p.startDate} · {p.count} ekor · {p.initialWeight || "?"}g/ekor ·
                     offset {p.offsetAge}h
                   </span>
-                  <Button size="sm" variant="outline" onClick={() => loadPlan(p)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full shrink-0 sm:w-auto"
+                    onClick={() => loadPlan(p)}
+                  >
                     Muat
                   </Button>
                 </div>

@@ -30,16 +30,18 @@ function Toggle({
   onClick: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-muted/40 px-3 py-4">
+    <div className="flex h-full flex-col items-center gap-2 rounded-xl border border-border bg-muted/40 px-2 py-4 text-center sm:px-3">
       <Icon
-        className={cn("h-6 w-6", on ? "text-primary" : "text-muted-foreground")}
+        className={cn("h-6 w-6 shrink-0", on ? "text-primary" : "text-muted-foreground")}
       />
-      <div className="label-overline">{label}</div>
+      <div className="label-overline flex min-h-[2rem] items-center justify-center leading-tight">
+        {label}
+      </div>
       <button
         onClick={onClick}
         disabled={disabled}
         className={cn(
-          "w-full rounded-lg px-3 py-2 text-sm font-bold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40",
+          "mt-auto w-full rounded-lg px-2 py-2 text-sm font-bold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40",
           on
             ? "bg-primary text-primary-foreground shadow-glow"
             : "border border-border bg-background text-foreground hover:bg-accent",
