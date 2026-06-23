@@ -14,7 +14,7 @@ Dashboard web realtime + firmware ESP32 dual-core, terhubung lewat Firebase.
 [![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-components-111827)](https://ui.shadcn.com)
 [![Firebase](https://img.shields.io/badge/Firebase-Auth%20%7C%20RTDB%20%7C%20Firestore-FFCA28?logo=firebase&logoColor=black)](https://firebase.google.com)
 [![ESP32](https://img.shields.io/badge/ESP32-Dual--Core%20FreeRTOS-E7352C?logo=espressif&logoColor=white)](https://www.espressif.com)
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-000000?logo=vercel&logoColor=white)](https://vercel.com)
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-000000?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
 
 <sub>Tugas Akhir — Program Studi Sarjana Terapan Teknik Elektronika, Jurusan Teknik Elektro, Politeknik Negeri Malang</sub>
 
@@ -97,7 +97,11 @@ Komunikasi alat ↔ cloud memakai **REST API JSON murni** (tanpa SDK Firebase di
 
 Dashboard di-deploy di Vercel — silakan login menggunakan akun yang telah didaftarkan oleh admin (tidak ada pendaftaran mandiri).
 
-<!-- VERCEL_DEMO_URL -->
+<div align="center">
+
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-shrimpfeeder--ebon.vercel.app-22c55e?logo=vercel&logoColor=white)](https://shrimpfeeder-ebon.vercel.app)
+
+</div>
 
 <details>
 <summary><b>Pratinjau alur</b></summary>
