@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, Check, Save, Table2 } from "lucide-react";
+import { CalendarClock, Check, Clock, Plus, Save, Table2, X } from "lucide-react";
 
 import { useRtdbValue, writeActiveSchedule } from "@/hooks/useRtdb";
 import {
@@ -136,10 +136,32 @@ export function ScheduleManager() {
       cycles: f.cycles.map((c, idx) => (idx === i ? { ...c, ...patch } : c)),
     }));
 
+  // --- Jam makan dinamis ---
+  const setFeedTime = (i: number, val: string) =>
+    setForm((f) => ({
+      ...f,
+      feedTimes: f.feedTimes.map((t, idx) => (idx === i ? val : t)),
+    }));
+  const addFeedTime = () =>
+    setForm((f) =>
+      f.feedTimes.length >= 6 ? f : { ...f, feedTimes: [...f.feedTimes, "12:00"] },
+    );
+  const removeFeedTime = (i: number) =>
+    setForm((f) =>
+      f.feedTimes.length <= 1
+        ? f
+        : { ...f, feedTimes: f.feedTimes.filter((_, idx) => idx !== i) },
+    );
+
   const persist = async (enabled: boolean, archive: boolean) => {
     setSaving(true);
     try {
-      const sched: ActiveSchedule = { ...form, enabled };
+      // Bersihkan jam: buang yang kosong/invalid, urutkan kronologis, dedup.
+      const cleanTimes = Array.from(
+        new Set(form.feedTimes.filter((t) => /^\d{2}:\d{2}$/.test(t))),
+      ).sort();
+      const feedTimes = cleanTimes.length ? cleanTimes : DEFAULT_FEED_TIMES;
+      const sched: ActiveSchedule = { ...form, enabled, feedTimes };
       await writeActiveSchedule(sched);
       setForm(sched);
       if (archive) {
@@ -190,7 +212,7 @@ export function ScheduleManager() {
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Input global */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <div className="flex h-full flex-col gap-1">
             <Label className="label-overline leading-tight">Tgl Mulai</Label>
             <Input
@@ -231,12 +253,54 @@ export function ScheduleManager() {
               onChange={(e) => setField("initialWeight", parseFloat(e.target.value) || 0)}
             />
           </div>
-          <div className="flex h-full flex-col gap-1">
-            <Label className="label-overline leading-tight">Jam Makan</Label>
-            <div className="mt-auto flex h-10 items-center truncate rounded-md border border-border bg-muted/40 px-3 text-sm font-medium">
-              {form.feedTimes.join(" · ")}
-            </div>
+        </div>
+
+        {/* Jam makan — dinamis (bisa diubah, tambah, hapus) */}
+        <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <Label className="label-overline flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5 text-primary" />
+              Jam Makan · {form.feedTimes.length}× / hari
+            </Label>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addFeedTime}
+              disabled={form.feedTimes.length >= 6}
+            >
+              <Plus className="h-4 w-4" /> Tambah Jam
+            </Button>
           </div>
+          <div className="flex flex-wrap gap-2">
+            {form.feedTimes.map((t, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1 rounded-lg border border-border bg-background py-1 pl-2 pr-1"
+              >
+                <Input
+                  type="time"
+                  aria-label={`Jam makan ${i + 1}`}
+                  value={t}
+                  onChange={(e) => setFeedTime(i, e.target.value)}
+                  className="h-8 w-[6.5rem] border-0 bg-transparent px-1 text-sm font-semibold tabular-nums focus-visible:ring-0"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeFeedTime(i)}
+                  disabled={form.feedTimes.length <= 1}
+                  aria-label={`Hapus jam makan ${i + 1}`}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Jumlah jam makan memengaruhi <b>setpoint per feed</b> (pakan harian dibagi{" "}
+            {form.feedTimes.length}). Maks 6 jam, diurutkan & dirapikan otomatis saat disimpan.
+          </p>
         </div>
 
         {/* Tabel siklus */}
