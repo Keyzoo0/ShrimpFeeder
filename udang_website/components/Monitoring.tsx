@@ -10,8 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 const STEPS = [
   { label: "Motor Buka", stages: [1], icon: Settings },
   { label: "Timbang", stages: [2], icon: Scale },
-  { label: "Tutup+Servo", stages: [3, 4], icon: Lock },
-  { label: "Blower+Kosong", stages: [5, 6, 7], icon: Wind },
+  { label: "Tutup + Servo", stages: [3, 4], icon: Lock },
+  { label: "Blower + Kosong", stages: [5, 6, 7], icon: Wind },
 ];
 
 function Chip({ label, value, ok }: { label: string; value: string; ok: boolean }) {
@@ -70,7 +70,7 @@ export function Monitoring() {
               <div
                 key={i}
                 className={cn(
-                  "rounded-xl border px-2 py-3 text-center text-[10px] font-semibold transition",
+                  "flex min-h-[3.75rem] flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2.5 text-center text-[10px] font-semibold leading-tight transition",
                   active
                     ? "border-primary bg-primary/10 text-primary shadow-glow"
                     : done
@@ -78,8 +78,8 @@ export function Monitoring() {
                     : "border-border text-muted-foreground",
                 )}
               >
-                <Icon className="mx-auto mb-1 h-4 w-4" />
-                {st.label}
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="break-words">{st.label}</span>
               </div>
             );
           })}
