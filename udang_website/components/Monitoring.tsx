@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings, Scale, Lock, Wind, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Scale, Lock, Wind, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { useRtdbValue } from "@/hooks/useRtdb";
 import type { DeviceState } from "@/lib/types";
@@ -8,10 +8,10 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const STEPS = [
-  { label: "Motor Buka", stages: [1], icon: Settings },
-  { label: "Timbang", stages: [2], icon: Scale },
-  { label: "Tutup + Servo", stages: [3, 4], icon: Lock },
-  { label: "Blower + Kosong", stages: [5, 6, 7], icon: Wind },
+  { label: "Buka & Timbang", stages: [1, 2], icon: Scale },
+  { label: "Tutup & Servo", stages: [3, 4, 5], icon: Lock },
+  { label: "Blower", stages: [6, 7], icon: Wind },
+  { label: "Tare & Tutup", stages: [8, 9], icon: CheckCircle2 },
 ];
 
 function Chip({ label, value, ok }: { label: string; value: string; ok: boolean }) {

@@ -5,7 +5,7 @@ export interface DeviceState {
   ssr?: number; // 0/1
   servo?: number; // 0/50
   feeding?: boolean;
-  stage?: number; // 0..8
+  stage?: number; // 0..9
   stageLabel?: string;
   online?: boolean;
   lastSeen?: number; // epoch ms
@@ -17,6 +17,7 @@ export interface Command {
   ssr: number | null;
   servo: number | null;
   feedNow: boolean;
+  setpoint: number | null; // takaran manual (gram) untuk feedNow; null = pakai jadwal
   stop: boolean;
   ts: number;
   by: string;
@@ -32,12 +33,13 @@ export interface FeedEvent {
 
 export const STAGE_LABELS: Record<number, string> = {
   0: "Idle",
-  1: "Motor Buka",
+  1: "Buka Katup",
   2: "Timbang",
-  3: "Motor Tutup",
-  4: "Servo Tutup",
-  5: "Blower",
-  6: "Buka Gate",
-  7: "Dispense",
-  8: "Selesai",
+  3: "Tutup Katup",
+  4: "Buka Servo",
+  5: "Jeda 3s",
+  6: "Blower",
+  7: "Blower 3s",
+  8: "Tare + Tutup",
+  9: "Selesai",
 };

@@ -87,11 +87,13 @@ Pada budidaya udang, pakan menyumbang porsi biaya operasional terbesar. Penakara
 
 | Kategori | Fitur |
 |---|---|
-| **Monitoring** | Berat load cell realtime, status motor/servo/blower, encoder, indikator online/offline alat, tahap proses feeding |
-| **Kontrol Manual** | Buka/tutup motor katup, ON/OFF SSR blower, buka/tutup servo gate, tombol **Mulai/Stop Feeding** |
-| **Penjadwalan Otomatis** | Tanggal mulai, offset umur, jumlah udang, berat awal/ekor, jam makan (default 3×/hari), 4 siklus pertumbuhan yang bisa diedit |
+| **Monitoring** | Berat load cell realtime, status motor/servo/blower, encoder, indikator online/offline alat, tahap (stage) proses feeding |
+| **Respon Realtime** | Poll perintah **0,5 dtk** + koneksi Firebase **keep-alive** (tanpa handshake TLS berulang) → aksi tombol terasa di alat **≤ ~0,7 dtk** |
+| **Kontrol Manual** | Buka/tutup motor katup, ON/OFF SSR blower, buka/tutup servo gate, **input takaran (gram)** + tombol **Mulai/Stop Feeding** |
+| **Feed Manual Aman** | Takaran wajib diisi (tombol terkunci bila kosong/≤0), otomatis disarankan dari jadwal hari ini — mencegah dosis salah/fallback |
+| **Penjadwalan Otomatis** | Tanggal mulai, offset umur, jumlah udang, berat awal/ekor, **jam makan dinamis** (bisa tambah/edit/hapus), 4 siklus pertumbuhan yang bisa diedit |
 | **Perhitungan Pakan** | Setpoint per-feed dihitung otomatis dari biomassa × FR, tabel harian sepanjang masa tebar |
-| **Riwayat** | Catatan tiap event pakan (waktu, berat aktual vs setpoint, siklus, trigger) tersimpan di Firestore |
+| **Riwayat** | Catatan tiap event pakan (waktu, berat ditakar vs setpoint, siklus, trigger) tersimpan di Firestore |
 | **Multi-user** | Autentikasi email/password (Firebase Auth), beberapa pengguna memantau alat yang sama (last-write-wins) |
 | **Info Tugas Akhir** | Data judul, mahasiswa & dosen pembimbing dapat diedit langsung dari dashboard, tersinkron realtime |
 | **UX** | Tema Aqua Laut light/dark, responsif (mobile-first), komponen shadcn/ui aksesibel, notifikasi toast |
@@ -134,21 +136,23 @@ Komunikasi alat ↔ cloud memakai **REST API JSON murni** (tanpa SDK Firebase di
 
 ## ⚙️ Cara Kerja Sistem (State Machine Feeding)
 
-Proses satu siklus pemberian pakan dijalankan sebagai **state machine** di `sysTask` (Core 1). Nilai `stage` ini dikirim ke `/state` dan ditampilkan di dashboard sebagai progress.
+Proses satu siklus pemberian pakan dijalankan sebagai **state machine** di `sysTask` (Core 1). Sebelum stage 1, timbangan **di-tare** dulu agar takaran akurat. Nilai `stage` ini dikirim ke `/state` dan ditampilkan di dashboard sebagai progress.
 
 | Stage | Label | Aksi |
 |:---:|---|---|
+| — | **Tare** | Timbangan dinolkan (`scale.tare()`) sebelum siklus dimulai |
 | 0 | **Idle** | Menunggu jadwal / perintah manual |
-| 1 | **Motor Buka** | Motor BTS7960 membuka katup (target encoder `POSISI_BUKA`) |
-| 2 | **Timbang** | Load cell HX711 menimbang pakan yang turun sampai mencapai setpoint |
-| 3 | **Motor Tutup** | Katup ditutup kembali (target encoder `POSISI_TUTUP`) |
-| 4 | **Servo Tutup** | Servo gate memastikan posisi tertutup |
-| 5 | **Blower** | SSR menyalakan blower untuk meniup/menyebar pakan |
-| 6 | **Buka Gate** | Servo gate membuka untuk menjatuhkan pakan |
-| 7 | **Dispense** | Pakan dikeluarkan sampai wadah kosong (di bawah `EMPTY_THRESHOLD`) |
-| 8 | **Selesai** | Event dicatat → `POST /feedEvents`, kembali ke Idle |
+| 1 | **Buka Katup** | Motor BTS7960 membuka katup (target encoder `POSISI_BUKA`) |
+| 2 | **Timbang** | Load cell HX711 menimbang pakan; katup ditutup di **`setpoint − WEIGH_OVERSHOOT_G` (−100 g)** untuk mengompensasi pakan yang masih jatuh saat menutup |
+| 3 | **Tutup Katup** | Katup ditutup ke HOME (limit switch); takaran final disimpan |
+| 4 | **Buka Servo** | Servo gate **dibuka** (sebelum blower) agar pakan turun ke jalur blower |
+| 5 | **Jeda 3 dtk** | Tunggu `SETTLE_MS` (3 dtk) agar pakan turun stabil, baru blower |
+| 6 | **Blower** | SSR menyalakan blower, mendorong pakan keluar sampai berat **< `EMPTY_THRESHOLD` (50 g)** |
+| 7 | **Blower 3 dtk** | Blower lanjut `BLOW_EXTRA_MS` (3 dtk) untuk membersihkan sisa |
+| 8 | **Tare + Tutup** | Blower OFF → **tare** → tutup servo → event dicatat `POST /feedEvents` |
+| 9 | **Selesai** | Tunggu servo tertutup, kembali ke Idle |
 
-**Pengaman (safety timeout):** gerak motor dibatasi `MOTOR_MOVE_TIMEOUT` (8 dtk), proses timbang `WEIGH_TIMEOUT` (60 dtk), pengosongan `EMPTY_TIMEOUT` (30 dtk). Perintah **Stop** dari dashboard memutus proses kapan pun lewat flag atomik `g_stopRequested`.
+**Pengaman (safety timeout):** gerak motor dibatasi `MOTOR_MOVE_TIMEOUT` (8 dtk), proses timbang `WEIGH_TIMEOUT` (60 dtk), pengosongan `EMPTY_TIMEOUT` (30 dtk). Penutupan katup memakai **limit switch** sebagai HOME (encoder dikalibrasi ulang ke 0). Perintah **Stop** dari dashboard memutus proses kapan pun lewat flag atomik `g_stopRequested`.
 
 ---
 
@@ -203,7 +207,8 @@ Dashboard juga membangun **tabel harian** untuk seluruh masa tebar (umur → sik
     stage, stageLabel, online, lastSeen, error }
 
 /command               // Command — ditulis web, dibaca alat
-  { motor, ssr, servo, feedNow, stop, ts, by }
+  { motor, ssr, servo, feedNow, setpoint, stop, ts, by }
+  //                             ^ takaran manual (g) utk feedNow; null = pakai jadwal
 
 /activeSchedule        // ActiveSchedule — jadwal aktif yang dipakai alat
   { enabled, startDate, offsetAge, count, initialWeight,
@@ -265,12 +270,12 @@ ramadhan_udang/
     ├── components/
     │   ├── AppShell.tsx                 # Header, tab nav, auth-guard, badge online
     │   ├── Monitoring.tsx               # Berat realtime, flow stage, status komponen
-    │   ├── ControlPanel.tsx             # Kontrol manual + mulai/stop feeding
-    │   ├── ScheduleManager.tsx          # Penjadwalan 4 siklus + tabel harian
+    │   ├── ControlPanel.tsx             # Kontrol manual + input takaran + mulai/stop feeding
+    │   ├── ScheduleManager.tsx          # Penjadwalan 4 siklus + jam makan dinamis + tabel harian
     │   ├── History.tsx                  # Riwayat feeding
     │   └── ui/                          # Komponen shadcn/ui (button, card, dialog, ...)
     ├── hooks/
-    │   ├── useAuth.ts                   # State autentikasi
+    │   ├── useAuth.tsx                  # State autentikasi (AuthProvider context)
     │   └── useRtdb.ts                   # Baca/tulis Realtime Database + sendCommand
     ├── lib/
     │   ├── firebase.ts                  # Inisialisasi Firebase
@@ -340,8 +345,8 @@ Salin `.env.example` → `.env.local`, lalu isi dari **Firebase Console → Proj
 
 Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_firebase). Ditulis Arduino C++, memisahkan beban ke **dua core FreeRTOS**:
 
-- **Core 0 — `netTask` (PRO_CPU):** WiFi + reconnect, NTP (WIB UTC+7), autentikasi & refresh token Firebase, lalu `GET /command`, `PUT /state`, `GET /activeSchedule`, `POST /feedEvents`. Semua lewat **REST API** (`WiFiClientSecure` + `HTTPClient` + `ArduinoJson`), tanpa SDK Firebase.
-- **Core 1 — `sysTask` (APP_CPU):** HX711 (load cell), motor DC (BTS7960 + encoder + safety timeout), servo non-blocking, blower (SSR), LCD 16×2 I2C, 3 push button, dan **state-machine feeding** + scheduler. Real-time, tidak pernah diblok jaringan.
+- **Core 0 — `netTask` (PRO_CPU):** WiFi + reconnect, NTP (WIB UTC+7), autentikasi & refresh token Firebase, lalu `GET /command`, `PUT /state`, `GET /activeSchedule`, `POST /feedEvents`. Semua lewat **REST API** (`WiFiClientSecure` + `HTTPClient` + `ArduinoJson`) memakai **koneksi keep-alive** (socket TLS dipakai ulang → hemat handshake ~1 dtk/request → respon cepat), tanpa SDK Firebase.
+- **Core 1 — `sysTask` (APP_CPU):** HX711 (load cell), motor DC (BTS7960 + encoder + **limit switch HOME** + safety timeout), servo non-blocking, blower (SSR), LCD 16×2 I2C, 3 push button, dan **state-machine feeding** + scheduler. Saat boot melakukan **homing** (motor menutup penuh sampai limit switch → kalibrasi encoder = 0, posisi awal pasti aman). Real-time, tidak pernah diblok jaringan.
 
 > **Aturan emas:** objek jaringan hanya disentuh Core 0; hardware (HX711/Servo/LCD/motor/SSR) hanya disentuh Core 1. Data lintas-core hanya lewat `cmdQueue`, `feedEvtQueue`, `stateMutex`, `schedMutex`, dan flag atomik (`g_fbReady`, `g_wifiOnline`, `g_stopRequested`).
 
@@ -350,19 +355,22 @@ Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_fire
 
 | Parameter | Nilai default |
 |---|---|
-| Poll command | 1500 ms |
-| Push state | 2000 ms |
+| Poll command | **500 ms** (koneksi keep-alive) |
+| Push state | **1000 ms** |
 | Fetch schedule | 30000 ms |
 | Refresh LCD | 500 ms |
 | Timeout gerak motor | 8000 ms |
 | Timeout timbang | 60000 ms |
 | Timeout pengosongan | 30000 ms |
 | Berat valid minimum | 50 g (di bawahnya dianggap 0) |
-| Threshold kosong | 30 g |
+| Threshold kosong (`EMPTY_THRESHOLD`) | **50 g** |
+| Kompensasi overshoot (`WEIGH_OVERSHOOT_G`) | **100 g** — katup ditutup di `setpoint − 100` |
+| Jeda servo → blower (`SETTLE_MS`) | 3000 ms |
+| Blower lanjut setelah <50 g (`BLOW_EXTRA_MS`) | 3000 ms |
 | NTP server | `pool.ntp.org`, `time.google.com` |
 | Core requirement | Arduino-ESP32 core 3.x |
 
-**Library:** `ArduinoJson` v6 · `HX711` · `LiquidCrystal_I2C` · `ESP32Servo`.
+**Library:** `ArduinoJson` v7 · `HX711` · `LiquidCrystal_I2C` · `ESP32Servo`.
 
 </details>
 
@@ -380,6 +388,7 @@ Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_fire
 | 25 | LPWM | BTS7960 (motor mundur) |
 | 34 | ENCODER_A | Encoder posisi katup |
 | 35 | ENCODER_B | Encoder posisi katup |
+| 19 | LIMIT_SW | Limit switch HOME katup (aktif LOW, `INPUT_PULLUP`) |
 | 14 | SSR_PIN | Blower (SSR) |
 | 23 | SERVO_PIN | Servo gate pakan |
 | 32 | PB1 | Push button — Motor |
@@ -387,13 +396,16 @@ Firmware ada di [`firmware/shrimp_feeder_firebase/`](firmware/shrimp_feeder_fire
 | 27 | PB3 | Push button — Servo |
 | 21 / 22 | SDA / SCL | LCD 16×2 I2C (alamat `0x27`) |
 
-> Konstanta tunable: `POSISI_BUKA 600`, `POSISI_TUTUP -100`, `PWM_MOTOR 100`, `TOLERANSI 5`, `SERVO_CLOSE 0°`, `SERVO_OPEN 40°`.
+> Konstanta tunable: `POSISI_BUKA 461`, `POSISI_TUTUP 0` (HOME = limit switch), `PWM_MOTOR 120`, `TOLERANSI 3`, `SERVO_CLOSE 0°`, `SERVO_OPEN 40°`, `WEIGH_OVERSHOOT_G 100 g`.
+>
+> **Penutupan katup:** limit switch adalah otoritas HOME (saat tertekan → motor stop + encoder di-nol-kan). Encoder jadi cadangan bila switch gagal. Saat boot alat melakukan homing otomatis.
 
 ### Bill of Materials (komponen utama)
 
 - ESP32 DevKit (mikrokontroler dual-core)
 - Load cell + modul amplifier **HX711**
 - Motor DC + driver **BTS7960** + rotary **encoder**
+- **Limit switch** (kalibrasi HOME / posisi tutup katup)
 - **Servo** (gate penjatuh pakan)
 - **SSR** (Solid State Relay) + **blower**
 - **LCD 16×2 I2C**

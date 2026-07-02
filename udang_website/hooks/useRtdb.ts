@@ -22,7 +22,9 @@ export function useRtdbValue<T>(path: string): { data: T | null; loading: boolea
   return { data, loading };
 }
 
-type CommandFields = Partial<Pick<Command, "motor" | "ssr" | "servo" | "feedNow" | "stop">>;
+type CommandFields = Partial<
+  Pick<Command, "motor" | "ssr" | "servo" | "feedNow" | "setpoint" | "stop">
+>;
 
 /** Tulis command lengkap (set, bukan update) agar tidak ada field basi. Last-write-wins via ts. */
 export async function sendCommand(fields: CommandFields, uid?: string): Promise<void> {
@@ -31,6 +33,7 @@ export async function sendCommand(fields: CommandFields, uid?: string): Promise<
     ssr: null,
     servo: null,
     feedNow: false,
+    setpoint: null,
     stop: false,
     ...fields,
     ts: Date.now(),

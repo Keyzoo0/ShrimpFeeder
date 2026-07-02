@@ -21,7 +21,7 @@
  *    - Data lintas-core HANYA lewat: cmdQueue, feedEvtQueue, stateMutex,
  *      schedMutex, dan flag atomik (g_fbReady/g_wifiOnline/g_stopRequested).
  *
- *  Butuh Arduino-ESP32 core 3.x (analogWrite tersedia). Lib: ArduinoJson v6,
+ *  Butuh Arduino-ESP32 core 3.x (analogWrite tersedia). Lib: ArduinoJson v7,
  *  HX711, LiquidCrystal_I2C, ESP32Servo.
  *
  *  CATATAN KEAMANAN: isi kredensial di bawah, JANGAN commit nilai asli ke repo
@@ -58,16 +58,23 @@ const int   DST_OFFSET_SEC = 0;
 const char* NTP1 = "pool.ntp.org";
 const char* NTP2 = "time.google.com";
 
-// Interval (ms)
-const unsigned long POLL_CMD_INTERVAL   = 1500;
-const unsigned long PUSH_STATE_INTERVAL = 2000;
-const unsigned long FETCH_SCHED_INTERVAL= 30000;
+// Interval (ms) — dipercepat untuk respon mendekati real-time.
+// Aman karena koneksi DB pakai keep-alive (lihat g_db) → tak handshake TLS tiap request.
+const unsigned long POLL_CMD_INTERVAL   = 500;    // latensi tombol/feedNow/stop ≤ ~0.7 dtk
+const unsigned long PUSH_STATE_INTERVAL = 1000;   // telemetri & status online terasa live
+const unsigned long FETCH_SCHED_INTERVAL= 30000;  // jadwal jarang berubah, cukup 30 dtk
 const unsigned long LCD_INTERVAL        = 500;
 
 // Safety timeout feeding (ms)
 const unsigned long MOTOR_MOVE_TIMEOUT  = 8000;
 const unsigned long WEIGH_TIMEOUT       = 60000;
 const unsigned long EMPTY_TIMEOUT       = 30000;
+
+// Parameter sekuens pakan (tune sesuai hardware)
+const float         WEIGH_OVERSHOOT_G = 100.0;  // tutup katup lebih awal sebesar ini: pakan
+                                                // masih jatuh saat katup menutup (mis. SP 500 -> tutup di 400)
+const unsigned long SETTLE_MS         = 3000;   // jeda setelah servo BUKA, sebelum blower nyala
+const unsigned long BLOW_EXTRA_MS     = 3000;   // lanjut blower setelah berat < EMPTY_THRESHOLD
 
 // Periode loop tiap task
 const TickType_t SYS_TICK = pdMS_TO_TICKS(10);   // kontrol real-time
@@ -82,10 +89,11 @@ uint8_t dataPin = 15, clockPin = 5;
 #define LPWM 25
 #define ENCODER_A 34
 #define ENCODER_B 35
-#define POSISI_BUKA   600
-#define POSISI_TUTUP -100
-#define PWM_MOTOR 100
-#define TOLERANSI 5
+#define LIMIT_SW  19          // limit switch HOME katup (NO->GND), aktif LOW (INPUT_PULLUP)
+#define POSISI_BUKA   400    // hitungan encoder saat katup BUKA penuh (hasil kalibrasi bench)
+#define POSISI_TUTUP  0       // HOME = posisi limit switch; encoder dikalibrasi 0 di sini
+#define PWM_MOTOR 120
+#define TOLERANSI 3
 
 #define SSR_PIN 14
 #define SERVO_PIN 23
@@ -93,7 +101,7 @@ uint8_t dataPin = 15, clockPin = 5;
 #define SERVO_CLOSE    0    // gate TUTUP (idle/normal)
 #define SERVO_OPEN    40    // gate BUKA (dispense pakan)
 #define SERVO_STEP_MS 1    // ms antar step (makin kecil makin cepat)
-#define SERVO_STEP_DEG 40    // derajat per step (makin besar makin cepat)
+#define SERVO_STEP_DEG 50    // derajat per step (makin besar makin cepat)
 #define PB1 32   // Motor
 #define PB2 33   // SSR
 #define PB3 27   // Servo
@@ -103,7 +111,7 @@ Servo myservo;
 // ============================ STATE HARDWARE (milik sysTask) ================
 float berat = 0;
 const float WEIGHT_VALID_MIN = 50.0;   // < ini dianggap 0
-const float EMPTY_THRESHOLD  = 30.0;   // dianggap kosong saat blower
+const float EMPTY_THRESHOLD  = 50.0;   // blower berhenti saat berat < ini ("dibawah 50")
 
 volatile long encoderCount = 0;
 bool  posisiBuka = false;
@@ -118,6 +126,7 @@ unsigned long lastServoStep = 0;
 
 // ============================ STATE JARINGAN (milik netTask) ================
 WiFiClientSecure tls;
+HTTPClient g_db;                  // koneksi DB persisten (keep-alive) -> hemat handshake TLS = respon cepat
 String idToken = "";
 unsigned long tokenExpireMs = 0;
 double lastCmdTs = 0;             // last-write-wins tracking
@@ -176,25 +185,42 @@ SemaphoreHandle_t stateMutex   = nullptr;
 SemaphoreHandle_t schedMutex   = nullptr;
 
 // ============================ FEEDING STATE MACHINE (sysTask) ===============
-enum FeedStage { F_IDLE, F_OPEN, F_WEIGH, F_CLOSE, F_SERVO, F_BLOWER, F_EMPTY, F_DISPENSE, F_DONE };
+// Urutan baru:
+//  TARE -> buka katup -> timbang (tutup di SP-100) -> tutup katup ->
+//  buka servo -> jeda 3s -> blower ON -> dorong s/d <50 -> blower 3s lagi ->
+//  blower OFF -> TARE -> tutup servo -> selesai.
+enum FeedStage {
+  F_IDLE,        // 0
+  F_OPEN,        // 1  buka katup (motor)
+  F_WEIGH,       // 2  timbang s/d (setpoint - WEIGH_OVERSHOOT_G)
+  F_CLOSE,       // 3  tutup katup (motor)
+  F_SERVO_OPEN,  // 4  buka servo (gerbang dispense)
+  F_SETTLE,      // 5  jeda 3 dtk sebelum blower
+  F_BLOW,        // 6  blower dorong pakan s/d berat < EMPTY_THRESHOLD
+  F_BLOW_EXTRA,  // 7  blower lanjut 3 dtk
+  F_FINISH,      // 8  blower OFF -> tare -> tutup servo
+  F_DONE         // 9  selesai (tunggu servo tertutup)
+};
 
 // Stage labels (pakai int agar Arduino auto-prototype tidak error)
 const char* stageLabel(int s) {
   switch (s) {
-    case F_IDLE:     return "Idle";
-    case F_OPEN:     return "MotorBuka";
-    case F_WEIGH:    return "Timbang";
-    case F_CLOSE:    return "MotorTutup";
-    case F_SERVO:    return "ServoTutup";
-    case F_BLOWER:   return "Blower";
-    case F_EMPTY:    return "BukaGate";
-    case F_DISPENSE: return "Dispense";
-    case F_DONE:     return "Selesai";
-    default:         return "?";
+    case F_IDLE:       return "Idle";
+    case F_OPEN:       return "BukaKatup";
+    case F_WEIGH:      return "Timbang";
+    case F_CLOSE:      return "TutupKatup";
+    case F_SERVO_OPEN: return "BukaServo";
+    case F_SETTLE:     return "Jeda 3s";
+    case F_BLOW:       return "Blower";
+    case F_BLOW_EXTRA: return "Blower 3s";
+    case F_FINISH:     return "Tare+Tutup";
+    case F_DONE:       return "Selesai";
+    default:           return "?";
   }
 }
 FeedStage feedStage = F_IDLE;
 float  feedSetpoint = 0;
+float  feedWeighed  = 0;   // takaran final yang ditimbang (untuk dicatat sbg "delivered")
 String feedCycleName = "";
 String feedTrigger = "auto";
 unsigned long stageStartMs = 0;
@@ -209,6 +235,7 @@ void IRAM_ATTR encoderISR() {
   } else {
     encoderCount = encoderCount - 1;
   }
+  if (encoderCount < 0) encoderCount = 0;   // HOME (limit switch) = 0, cegah nilai negatif
 }
 
 // ============================ MOTOR (sysTask) ===============================
@@ -226,7 +253,7 @@ void setMotorPosition(bool buka) {
     (encoderCount < POSISI_BUKA) ? motorMaju() : motorMundur();
   } else {
     targetEncoder = POSISI_TUTUP;
-    (encoderCount > POSISI_TUTUP) ? motorMundur() : motorMaju();
+    motorMundur();                       // TUTUP = selalu menuju HOME (limit switch)
   }
   motorRunning = true;
 }
@@ -234,10 +261,21 @@ void setMotorPosition(bool buka) {
 // dipanggil tiap loop sysTask: cek target tercapai ATAU timeout (anti-runaway)
 void updateMotor() {
   if (!motorRunning) return;
-  bool reached = (targetEncoder == POSISI_BUKA)
-                 ? (encoderCount >= POSISI_BUKA - TOLERANSI)
-                 : (encoderCount <= POSISI_TUTUP + TOLERANSI);
-  if (reached) { stopMotor(); return; }
+
+  if (targetEncoder == POSISI_BUKA) {
+    // BUKA: berhenti saat hitungan encoder mencapai target
+    if (encoderCount >= POSISI_BUKA - TOLERANSI) { stopMotor(); return; }
+  } else {
+    // TUTUP: PRIORITAS limit switch (HOME). Saat tertekan -> stop + kalibrasi encoder = 0.
+    if (digitalRead(LIMIT_SW) == LOW) {
+      stopMotor();
+      noInterrupts(); encoderCount = 0; interrupts();
+      return;
+    }
+    // Cadangan: bila limit switch gagal/terlepas, encoder tetap menghentikan motor
+    if (encoderCount <= POSISI_TUTUP + TOLERANSI) { stopMotor(); return; }
+  }
+
   if (millis() - motorStartMs > MOTOR_MOVE_TIMEOUT) {
     stopMotor();
     Serial.println("⚠️ MOTOR_TIMEOUT");
@@ -322,6 +360,7 @@ bool fbAuthenticate() {
   HTTPClient http;
   String url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + String(FB_API_KEY);
   http.begin(tls, url);
+  http.setReuse(false);   // host beda dari DB; jangan biarkan socket ter-ikat ke host auth
   http.addHeader("Content-Type", "application/json");
   String body = String("{\"email\":\"") + FB_DEVICE_EMAIL +
                 "\",\"password\":\"" + FB_DEVICE_PASS + "\",\"returnSecureToken\":true}";
@@ -347,40 +386,43 @@ void ensureToken() {
   if (!g_fbReady || millis() > tokenExpireMs) fbAuthenticate();
 }
 
+// Semua request DB pakai g_db (keep-alive): begin->...->end() dgn setReuse(true)
+// membuat socket TLS TETAP hidup ke host yg sama, jadi request berikutnya tak
+// handshake ulang (hemat ~1 dtk/poll) -> respon perintah & telemetri jauh lebih cepat.
 bool fbGet(const String &path, String &out) {
   if (!g_fbReady) return false;
-  HTTPClient http;
   String url = String(FB_DB_URL) + path + ".json?auth=" + idToken;
-  http.begin(tls, url);
-  http.setTimeout(6000);
-  int code = http.GET();
+  g_db.begin(tls, url);
+  g_db.setReuse(true);
+  g_db.setTimeout(6000);
+  int code = g_db.GET();
   bool ok = (code == 200);
-  if (ok) out = http.getString();
-  http.end();
+  if (ok) out = g_db.getString();
+  g_db.end();
   return ok;
 }
 
 bool fbPut(const String &path, const String &json) {
   if (!g_fbReady) return false;
-  HTTPClient http;
   String url = String(FB_DB_URL) + path + ".json?auth=" + idToken;
-  http.begin(tls, url);
-  http.addHeader("Content-Type", "application/json");
-  http.setTimeout(6000);
-  int code = http.PUT(json);
-  http.end();
+  g_db.begin(tls, url);
+  g_db.setReuse(true);
+  g_db.addHeader("Content-Type", "application/json");
+  g_db.setTimeout(6000);
+  int code = g_db.PUT(json);
+  g_db.end();
   return (code == 200);
 }
 
 bool fbPost(const String &path, const String &json) {
   if (!g_fbReady) return false;
-  HTTPClient http;
   String url = String(FB_DB_URL) + path + ".json?auth=" + idToken;
-  http.begin(tls, url);
-  http.addHeader("Content-Type", "application/json");
-  http.setTimeout(6000);
-  int code = http.POST(json);
-  http.end();
+  g_db.begin(tls, url);
+  g_db.setReuse(true);
+  g_db.addHeader("Content-Type", "application/json");
+  g_db.setTimeout(6000);
+  int code = g_db.POST(json);
+  g_db.end();
   return (code == 200);
 }
 
@@ -416,19 +458,22 @@ void pollCommand() {
   if (deserializeJson(doc, resp)) return;
   if (resp == "null") return;
 
-  // emergency stop = jalur cepat, selalu dihormati (sysTask yang meng-abort)
+  double ts = doc["ts"] | 0.0;
+  if (ts <= lastCmdTs) return;   // bukan command baru (cegah stop/command basi diproses ulang)
+  lastCmdTs = ts;
+
+  // emergency stop = command baru paling diutamakan; abaikan perintah lain di pesan yg sama
   if (doc["stop"] | false) {
     g_stopRequested = true;
     Serial.println("🛑 STOP diterima");
+    return;
   }
 
-  double ts = doc["ts"] | 0.0;
-  if (ts <= lastCmdTs) return;   // bukan command baru
-  lastCmdTs = ts;
-
-  // feedNow -> minta sysTask mulai feeding manual
+  // feedNow -> minta sysTask mulai feeding manual. value = setpoint (gram) dari web;
+  // 0 = tidak diisi -> sysTask pakai setpoint jadwal / fallback.
   if (doc["feedNow"] | false) {
-    DeviceCommand c = { CMD_FEED_NOW, 0 };
+    int sp = doc["setpoint"] | 0;
+    DeviceCommand c = { CMD_FEED_NOW, sp };
     xQueueSend(cmdQueue, &c, 0);
     return;
   }
@@ -504,12 +549,15 @@ void startFeeding(float setpoint, String cycleName, String trigger) {
   feedSetpoint  = setpoint;
   feedCycleName = cycleName;
   feedTrigger   = trigger;
+  feedWeighed   = 0;
   g_stopRequested = false;
+  scale.tare();                        // TARE dulu: nol-kan timbangan agar takaran akurat
+  berat = 0;
   feedStage = F_OPEN;
   stageStartMs = millis();
   setMotorPosition(true);              // buka katup
-  Serial.printf("🍽️ Feeding mulai: setpoint=%.0f g (%s/%s)\n",
-                setpoint, cycleName.c_str(), trigger.c_str());
+  Serial.printf("🍽️ Feeding mulai: setpoint=%.0f g, tutup di %.0f g (%s/%s)\n",
+                setpoint, setpoint - WEIGH_OVERSHOOT_G, cycleName.c_str(), trigger.c_str());
 }
 
 void abortFeeding() {
@@ -535,48 +583,57 @@ void updateFeeding() {
   unsigned long el = millis() - stageStartMs;
 
   switch (feedStage) {
-    case F_OPEN:
+    case F_OPEN:   // katup membuka, pakan mulai jatuh ke timbangan
       if (!motorRunning) { feedStage = F_WEIGH; stageStartMs = millis(); }
       else if (el > MOTOR_MOVE_TIMEOUT) { Serial.println("⚠️ open timeout"); feedStage = F_WEIGH; stageStartMs = millis(); }
       break;
 
-    case F_WEIGH:
-      if (berat >= feedSetpoint) { setMotorPosition(false); feedStage = F_CLOSE; stageStartMs = millis(); }
+    case F_WEIGH: {
+      // tutup lebih awal: kompensasi pakan yg masih jatuh saat katup menutup (SP-100)
+      float closeAt = feedSetpoint - WEIGH_OVERSHOOT_G;
+      if (closeAt < 0) closeAt = 0;
+      if (berat >= closeAt)        { setMotorPosition(false); feedStage = F_CLOSE; stageStartMs = millis(); }
       else if (el > WEIGH_TIMEOUT) { Serial.println("⚠️ weigh timeout"); setMotorPosition(false); feedStage = F_CLOSE; stageStartMs = millis(); }
       break;
+    }
 
-    case F_CLOSE:
-      if (!motorRunning || el > MOTOR_MOVE_TIMEOUT) { setServo(SERVO_CLOSE); feedStage = F_SERVO; stageStartMs = millis(); }
-      break;
-
-    case F_SERVO:
-      if (servoCurrent == SERVO_CLOSE || el > 1000) { setSSR(true); feedStage = F_BLOWER; stageStartMs = millis(); }
-      break;
-
-    case F_BLOWER:
-      if (el > 1500) { feedStage = F_EMPTY; stageStartMs = millis(); }   // beri jeda blower nyala
-      break;
-
-    case F_EMPTY:
-      // Buka gate agar blower dorong pakan keluar
-      setServo(SERVO_OPEN);
-      feedStage = F_DISPENSE; stageStartMs = millis();
-      break;
-
-    case F_DISPENSE:
-      if (berat <= EMPTY_THRESHOLD || el > EMPTY_TIMEOUT) {
-        setSSR(false);
-        setServo(SERVO_CLOSE);
-        enqueueFeedEvent(berat);
-        feedStage = F_DONE; stageStartMs = millis();
+    case F_CLOSE:  // katup menutup; setelah tertutup, simpan takaran lalu BUKA servo
+      if (!motorRunning || el > MOTOR_MOVE_TIMEOUT) {
+        feedWeighed = berat;                 // takaran final (≈ setpoint) yg akan didorong keluar
+        setServo(SERVO_OPEN);                // buka servo DULU (sebelum blower)
+        feedStage = F_SERVO_OPEN; stageStartMs = millis();
       }
+      break;
+
+    case F_SERVO_OPEN:  // tunggu servo benar-benar terbuka
+      if (servoCurrent == SERVO_OPEN || el > 1000) { feedStage = F_SETTLE; stageStartMs = millis(); }
+      break;
+
+    case F_SETTLE:  // jeda 3 dtk setelah servo buka, baru nyalakan blower
+      if (el >= SETTLE_MS) { setSSR(true); feedStage = F_BLOW; stageStartMs = millis(); }
+      break;
+
+    case F_BLOW:  // blower mendorong pakan keluar sampai timbangan < EMPTY_THRESHOLD (<50)
+      if (berat <= EMPTY_THRESHOLD || el > EMPTY_TIMEOUT) { feedStage = F_BLOW_EXTRA; stageStartMs = millis(); }
+      break;
+
+    case F_BLOW_EXTRA:  // sudah <50 -> hitung mundur 3 dtk sambil blower tetap nyala
+      if (el >= BLOW_EXTRA_MS) {
+        setSSR(false);                       // matikan blower
+        scale.tare(); berat = 0;             // TARE -> nol-kan timbangan
+        setServo(SERVO_CLOSE);               // tutup servo
+        enqueueFeedEvent(feedWeighed);       // catat takaran yg diberikan
+        feedStage = F_FINISH; stageStartMs = millis();
+      }
+      break;
+
+    case F_FINISH:  // tunggu servo benar-benar tertutup
+      if (servoCurrent == SERVO_CLOSE || el > 1500) { feedStage = F_DONE; stageStartMs = millis(); }
       break;
 
     case F_DONE:
-      if (servoCurrent == SERVO_CLOSE || el > 1000) {
-        feedStage = F_IDLE;
-        Serial.println("✅ Feeding selesai");
-      }
+      feedStage = F_IDLE;
+      Serial.println("✅ Feeding selesai");
       break;
 
     default: break;
@@ -611,8 +668,10 @@ void applyCommands() {
   while (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
     if (cmd.type == CMD_FEED_NOW) {
       if (feedStage == F_IDLE) {
-        String cyc; float sp = currentSetpoint(cyc);
-        if (sp <= 0) sp = 100;                       // fallback bila jadwal off
+        String cyc; float schedSp = currentSetpoint(cyc);
+        // prioritas: takaran manual dari web (cmd.value>0) -> jadwal -> fallback 100
+        float sp = (cmd.value > 0) ? (float)cmd.value : schedSp;
+        if (sp <= 0) sp = 100;
         startFeeding(sp, cyc.length() ? cyc : "manual", "manual");
       }
       continue;
@@ -673,6 +732,7 @@ void sysTask(void* pv) {
   pinMode(SSR_PIN, OUTPUT); digitalWrite(SSR_PIN, LOW);
   pinMode(RPWM, OUTPUT); pinMode(LPWM, OUTPUT);
   pinMode(ENCODER_A, INPUT); pinMode(ENCODER_B, INPUT);
+  pinMode(LIMIT_SW, INPUT_PULLUP);   // limit switch HOME katup, aktif LOW
   // Init motor PWM dulu (ledcAttachChannel, timer 1) SEBELUM servo (timer 0) agar timer tidak rebutan
   ledcAttachChannel(RPWM, 5000, 8, 4);   // channel 4 → timer 1 (beda dgn servo yg ch 0 → timer 0)
   ledcAttachChannel(LPWM, 5000, 8, 5);   // channel 5 → timer 1
@@ -682,6 +742,21 @@ void sysTask(void* pv) {
   lcd.init(); lcd.backlight();
   lcd.setCursor(0,0); lcd.print("Shrimp Feeder v3");
   lcd.setCursor(0,1); lcd.print("Init... [2core]");
+
+  // --- Homing katup: tutup penuh sampai limit switch supaya encoder ter-kalibrasi 0.
+  //     Posisi awal pasti TUTUP/aman walau alat reboot di tengah pakan. ---
+  lcd.setCursor(0,1); lcd.print("Homing katup... ");
+  if (digitalRead(LIMIT_SW) != LOW) {           // belum di HOME -> jalan mundur cari limit
+    motorMundur();
+    unsigned long hStart = millis();
+    while (digitalRead(LIMIT_SW) == HIGH && millis() - hStart < MOTOR_MOVE_TIMEOUT) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    stopMotor();
+  }
+  noInterrupts(); encoderCount = 0; interrupts();
+  posisiBuka = false;
+  targetEncoder = POSISI_TUTUP;
 
   scale.begin(dataPin, clockPin);
   scale.set_offset(193344);

@@ -14,6 +14,13 @@ build/
 dist/
 *.tsbuildinfo
 
+# Arduino / ESP32 build artifacts
+*.zip
+build/
+*.bin
+*.elf
+*.hex
+
 # Environment & secrets (JANGAN pernah commit kredensial)
 .env
 .env.*

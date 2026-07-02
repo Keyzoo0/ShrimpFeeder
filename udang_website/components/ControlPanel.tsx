@@ -1,15 +1,18 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { Settings, Wind, Wrench, Play, Square } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useRtdbValue, sendCommand } from "@/hooks/useRtdb";
 import type { DeviceState } from "@/lib/types";
+import { currentInfo, type ActiveSchedule } from "@/lib/schedule";
 import { cn } from "@/lib/utils";
 import { toast } from "./Toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 function Toggle({
@@ -56,9 +59,25 @@ function Toggle({
 export function ControlPanel() {
   const { user } = useAuth();
   const { data } = useRtdbValue<DeviceState>("/state");
+  const { data: sched } = useRtdbValue<ActiveSchedule>("/activeSchedule");
   const s = data || {};
   const uid = user?.uid;
   const feeding = !!s.feeding;
+
+  // saran takaran dari jadwal hari ini (sama dgn yang dihitung ESP32)
+  const suggested = useMemo(() => {
+    if (!sched) return 0;
+    return Math.round(currentInfo(sched).perFeed);
+  }, [sched]);
+
+  const [setpoint, setSetpoint] = useState("");
+  // isi otomatis dari saran jadwal sekali, selama user belum mengetik
+  useEffect(() => {
+    if (suggested > 0) setSetpoint((prev) => (prev === "" ? String(suggested) : prev));
+  }, [suggested]);
+
+  const spNum = Number(setpoint);
+  const spValid = Number.isFinite(spNum) && spNum > 0;
 
   const cmd = async (fields: Parameters<typeof sendCommand>[0], msg: string) => {
     try {
@@ -106,10 +125,35 @@ export function ControlPanel() {
           />
         </div>
 
+        <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-muted/30 p-3">
+          <label htmlFor="manual-setpoint" className="label-overline">
+            Takaran Pakan (gram)
+          </label>
+          <Input
+            id="manual-setpoint"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={10}
+            value={setpoint}
+            disabled={feeding}
+            onChange={(e) => setSetpoint(e.target.value)}
+            placeholder="mis. 200"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            {suggested > 0
+              ? `Saran jadwal hari ini: ${suggested} g (bisa diubah). `
+              : "Jadwal mati/di luar masa tebar — isi takaran manual. "}
+            Katup menutup lebih awal ±100 g (kompensasi pakan susulan).
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <Button
-            disabled={feeding}
-            onClick={() => cmd({ feedNow: true }, "Memulai feeding…")}
+            disabled={feeding || !spValid}
+            onClick={() =>
+              cmd({ feedNow: true, setpoint: spNum }, `Memulai feeding ${spNum} g…`)
+            }
           >
             <Play className="h-4 w-4" /> Mulai Feeding
           </Button>

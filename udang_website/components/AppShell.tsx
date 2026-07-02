@@ -25,11 +25,12 @@ function OnlineBadge() {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 3000);
+    const t = setInterval(() => setNow(Date.now()), 2000);
     return () => clearInterval(t);
   }, []);
 
-  const online = !!data?.online && now - (data?.lastSeen || 0) < 15000;
+  // alat push /state tiap ~1 dtk → anggap offline bila tak ada kabar 8 dtk
+  const online = !!data?.online && now - (data?.lastSeen || 0) < 8000;
 
   return (
     <Badge
